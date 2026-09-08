@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyd
+.pytest_cache/
+
+# pyRevit
+*.pyproj.user
+bin/
+obj/
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Extracted docx scratch content
+00.Technical Material/_extracted/
