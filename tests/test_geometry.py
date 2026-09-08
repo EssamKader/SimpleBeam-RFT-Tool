@@ -15,22 +15,66 @@ import pytest
 from fake_revit_api import FakeGeometryInstance, FakeXYZ
 
 from rft.revit.geometry import (
+    beam_section_centre_offsets,
+    beam_section_dimensions_mm,
     column_width_along_axis_mm,
     end_support_face_point,
+    point_at_cc_offset,
     start_support_face_point,
 )
 
 
 class _LocalBBox(object):
-    def __init__(self, min_xy, max_xy):
-        self.Min = FakeXYZ(min_xy[0], min_xy[1], 0)
-        self.Max = FakeXYZ(max_xy[0], max_xy[1], 0)
+    def __init__(self, min_xy, max_xy, min_z=0, max_z=0):
+        self.Min = FakeXYZ(min_xy[0], min_xy[1], min_z)
+        self.Max = FakeXYZ(max_xy[0], max_xy[1], max_z)
 
 
 class _Transform(object):
-    def __init__(self, basis_x, basis_y):
+    def __init__(self, basis_x, basis_y, basis_z=None, origin=None):
         self.BasisX = basis_x
         self.BasisY = basis_y
+        self.BasisZ = basis_z or FakeXYZ(0, 0, 1)
+        self.Origin = origin or FakeXYZ(0, 0, 0)
+
+    def OfPoint(self, point):
+        return (
+            self.Origin
+            + self.BasisX.Multiply(point.X)
+            + self.BasisY.Multiply(point.Y)
+            + self.BasisZ.Multiply(point.Z)
+        )
+
+
+class _Curve(object):
+    def __init__(self, start, end):
+        self._points = (start, end)
+
+    def GetEndPoint(self, index):
+        return self._points[index]
+
+
+class _LocationCurve(object):
+    def __init__(self, start, end):
+        self.Curve = _Curve(start, end)
+
+
+class _Beam(object):
+    """Beam stand-in: a location curve (which fixes the axis, and therefore
+    the section's u/v frame) plus optional local geometry and a world AABB.
+    """
+
+    def __init__(self, start, end, geometry_instances=None, world_bbox=None):
+        self.Location = _LocationCurve(start, end)
+        self.Id = 1234
+        self._geometry_instances = geometry_instances or []
+        self._world_bbox = world_bbox
+
+    def get_Geometry(self, _options):
+        return self._geometry_instances
+
+    def get_BoundingBox(self, _view):
+        return self._world_bbox
 
 
 class _LocationPoint(object):
@@ -78,7 +122,25 @@ def test_end_support_face_point_is_half_width_toward_the_span():
     face = end_support_face_point(column, beam_start, axis, support_width_internal=600)
 
     assert face.X == 6500 - 300
-    assert face.Y == 0
+
+
+def test_point_at_cc_offset_is_measured_from_the_reference_columns_centre():
+    """issue #18 (S5): a zone's c/c-datum offset (mm) must land at the
+    SAME point ``span_length_mm``/``stirrup_zones_mm`` treat as 0 -- the
+    reference column's own centre, not the beam curve's endpoint (mirrors
+    finding #2 from issue #14's review, reused here for zone origins)."""
+    beam_start = FakeXYZ(0, 0, 0)
+    axis = FakeXYZ(1, 0, 0)
+    column_center = FakeXYZ(-500, 0, 0)
+    column = _Column(location_point=column_center)
+
+    def to_internal(mm):
+        return mm  # identity: internal units == mm for this test
+
+    point = point_at_cc_offset(beam_start, axis, column, offset_mm=2000.0, to_internal_units=to_internal)
+
+    assert point.X == -500 + 2000.0
+    assert point.Y == 0
 
 
 def test_column_width_along_axis_uses_rotation_aware_local_bbox_when_available():
@@ -135,3 +197,111 @@ def test_column_width_along_axis_falls_back_to_aabb_without_geometry_instance():
     width_mm = column_width_along_axis_mm(column, axis_direction, from_internal_units=lambda v: v)
 
     assert width_mm == pytest.approx(600.0)
+
+
+def _beam_at_45_degrees(local_bbox, world_bbox=None):
+    """A 250 x 600 beam, 6000 mm long, rotated 45 degrees in plan. Its
+    family geometry runs along local X with the section in local Y/Z, and
+    its instance transform is the 45 degree plan rotation about the beam's
+    start point.
+    """
+    angle = math.radians(45)
+    axis = FakeXYZ(math.cos(angle), math.sin(angle), 0)
+    perp = FakeXYZ(-math.sin(angle), math.cos(angle), 0)
+    transform = _Transform(basis_x=axis, basis_y=perp)
+    geometry_instance = FakeGeometryInstance(local_bbox=local_bbox, transform=transform)
+    return _Beam(
+        start=FakeXYZ(0, 0, 0),
+        end=axis.Multiply(6000.0),
+        geometry_instances=[geometry_instance],
+        world_bbox=world_bbox,
+    )
+
+
+def test_beam_section_dimensions_are_rotation_aware():
+    """Issue #18 review finding #2: `get_BoundingBox(None)` is WORLD-axis
+    aligned, so for a beam at 45 degrees the perpendicular projection of
+    its AABB returns b + L -- 6250 mm for a 250 x 6000 beam -- instead of
+    250. The local-bbox path must recover the true 250 x 600 section even
+    though the (inflated) world AABB is also available.
+    """
+    half_diag = (6000.0 * math.cos(math.radians(45)) + 250.0 * math.cos(math.radians(45))) / 2.0
+
+    class _InflatedAABB(object):
+        Min = FakeXYZ(-half_diag, -half_diag, 0)
+        Max = FakeXYZ(half_diag, half_diag, 600)
+
+    local_bbox = _LocalBBox((0.0, -125.0), (6000.0, 125.0), min_z=-600.0, max_z=0.0)
+    beam = _beam_at_45_degrees(local_bbox, world_bbox=_InflatedAABB())
+
+    b_mm, h_mm = beam_section_dimensions_mm(beam, from_internal_units=lambda v: v)
+
+    assert b_mm == pytest.approx(250.0)
+    assert h_mm == pytest.approx(600.0)
+
+    # What the pre-fix world-AABB path produced, kept explicit so the
+    # regression is unmistakable if the local path is ever dropped.
+    u_dir = FakeXYZ(-math.sin(math.radians(45)), math.cos(math.radians(45)), 0)
+    aabb_corners = [
+        FakeXYZ(-half_diag, -half_diag, 0),
+        FakeXYZ(half_diag, -half_diag, 0),
+        FakeXYZ(-half_diag, half_diag, 0),
+        FakeXYZ(half_diag, half_diag, 0),
+    ]
+    aabb_proj = [u_dir.DotProduct(c) for c in aabb_corners]
+    assert max(aabb_proj) - min(aabb_proj) == pytest.approx(6250.0)
+
+
+def test_beam_section_dimensions_falls_back_to_aabb_without_geometry_instance():
+    """No `GeometryInstance`: fall back to the world AABB, which is correct
+    only for a beam parallel to a project axis (here, along world X)."""
+
+    class _AABB(object):
+        Min = FakeXYZ(0, -125, 0)
+        Max = FakeXYZ(6000, 125, 600)
+
+    beam = _Beam(start=FakeXYZ(0, 0, 0), end=FakeXYZ(6000, 0, 0), world_bbox=_AABB())
+
+    b_mm, h_mm = beam_section_dimensions_mm(beam, from_internal_units=lambda v: v)
+
+    assert b_mm == pytest.approx(250.0)
+    assert h_mm == pytest.approx(600.0)
+
+
+def test_beam_section_centre_offsets_recover_a_top_justified_beam():
+    """Issue #18 review finding #1: with Revit's default top-justified
+    structural framing the location curve lies on the beam's TOP face, so
+    the section centroid is h/2 below it. A cage centred on the location
+    curve would put half its depth outside the beam.
+    """
+
+    class _AABB(object):
+        Min = FakeXYZ(0, -125, -600)
+        Max = FakeXYZ(6000, 125, 0)
+
+    beam = _Beam(start=FakeXYZ(0, 0, 0), end=FakeXYZ(6000, 0, 0), world_bbox=_AABB())
+
+    du, dv = beam_section_centre_offsets(beam, station_point=FakeXYZ(2000, 0, 0))
+
+    assert du == pytest.approx(0.0)
+    assert dv == pytest.approx(-300.0)
+
+
+def test_beam_section_centre_offsets_are_rotation_aware_and_catch_a_lateral_shift():
+    """Both justifications at once on a rotated beam: the section sits
+    100 mm off the location curve across the beam (local Y from -25 to
+    225) and 300 mm below it (top-justified). The offsets must come back
+    in the SECTION's own (u, v) axes, not world X/Y.
+    """
+    local_bbox = _LocalBBox((0.0, -25.0), (6000.0, 225.0), min_z=-600.0, max_z=0.0)
+    beam = _beam_at_45_degrees(local_bbox)
+
+    du, dv = beam_section_centre_offsets(beam, station_point=FakeXYZ(0, 0, 0))
+
+    assert du == pytest.approx(100.0)
+    assert dv == pytest.approx(-300.0)
+
+    # The section dimensions read from the same bbox stay correct, which is
+    # the point of deriving both from one source.
+    b_mm, h_mm = beam_section_dimensions_mm(beam, from_internal_units=lambda v: v)
+    assert (b_mm, h_mm) == (pytest.approx(250.0), pytest.approx(600.0))

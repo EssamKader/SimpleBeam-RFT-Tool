@@ -50,6 +50,28 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   Revit-free pure calculation core, a thin Revit adapter converting units only
   at the API boundary, host validation with explicit cover read-back, and one
   transaction per beam with rollback on failure. 24 tests.
+- **S5 stirrups** (#18): full cage on a single-span beam — centreline leg
+  geometry, closure types 1/2/4 (type 3 rejected), and three
+  `SetLayoutAsMaximumSpacing` rebar sets clipped to the clear region with
+  dense spacing at the supports, all inside one transaction, plus a per-zone
+  and beam-total report. New `Stirrups.panel` pushbutton. 58 tests.
+
+### Fixed
+
+- **Section datum, found reviewing #18.** The stirrup cage was centred on the
+  beam's *location curve* rather than its section centroid — with Revit's
+  default top-justified structural framing that is the top face, so half the
+  cage would have sat outside a 600 mm deep beam. `b` was also read from the
+  *world* bounding box, which returns `b + L` for a beam not parallel to a
+  project axis (a 250×6000 beam at 45° measured 6250 mm). Both now use the
+  beam's own local bounding box and instance transform, the technique S1's
+  review already adopted for rotated columns. The second half was
+  pre-existing in S1 and only became visible once S5 consumed `b`.
+- **Reported stirrup counts contradicted the placement flags, found reviewing
+  #18.** The count ignored the R4 de-duplication flags, so the normal zone
+  reported 11 stirrups where 9 are placed. The flags are now a required
+  argument, so a count cannot be reported without stating which boundary bars
+  the zone owns.
 
 ### Decided
 
@@ -70,6 +92,11 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
   may be calling a non-existent API form; if so it throws on first real run.
   Accepted deliberately, to be corrected on first live Revit test.
+- **Hook angle is not verified.** The stirrup pushbutton resolves
+  `RebarHookType` by name and falls back to the first one in the document. A
+  project whose first hook type is a 90° bend therefore gets non-compliant
+  stirrups (rev 2 §7.3, A33 requires 180°) with only a printed note. Reading
+  the angle back needs a parameter shape that cannot be confirmed here.
 - No code in this project has ever been executed against a live Revit host.
   Every API decision rests on documentation, and passing tests validate
   adapter *logic* only — never API shape. See `CONTEXT.md`.
@@ -89,3 +116,4 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #9 | UI scope decisions |
 | #13 | Steel grade requirement |
 | #14 | S1 tracer bullet |
+| #18 | S5 stirrups |

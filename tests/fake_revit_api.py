@@ -29,8 +29,29 @@ Currently ``SHAPE UNVERIFIED``:
   shape may be wrong, not just the face argument. Tracked for correction
   against a live host — see ``docs/verification/s1-tracer-bullet.md``.
 - ``FamilyInstance.get_Geometry() -> GeometryInstance`` for a structural
-  column, used by the rotation-aware support-width path. The projection math
-  is tested; the extraction step is not.
+  column OR BEAM, used by the rotation-aware support-width path and, since
+  issue #18's review, by the beam's own section width and centroid datum.
+  The projection math is tested; the extraction step is not. If the real API
+  returns already-transformed ``Solid``s instead, both datum paths fall back
+  to the world AABB and the rotated-beam case regresses silently.
+- ``Transform.OfPoint(XYZ) -> XYZ`` and ``Transform.BasisZ``/``Origin``,
+  used to map a local bounding-box centre to world space
+  (``beam_section_centre_offsets``). Assumed to be the standard affine
+  mapping; not confirmed against a live host.
+- ``Rebar.GetShapeDrivenAccessor() -> RebarShapeDrivenAccessor`` and
+  ``RebarShapeDrivenAccessor.SetLayoutAsMaximumSpacing(spacing, arrayLength,
+  barsOnNormalSide, includeFirstBar, includeLastBar)``. Assumed from
+  docs/research/revit-api-strategy.md's documentation-only research (issue
+  #18, S5 stirrups); no live-host confirmation of the accessor's exact
+  parameter order, or that `GetShapeDrivenAccessor` is even the correct
+  accessor name for a `CreateFromCurves`-built stirrup (vs. a distinct
+  accessor for shape-driven vs. free-form rebar).
+- ``RebarStyle.StirrupTie`` and ``RebarHookType`` (angle/multiplier-bearing
+  hook object passed to `Rebar.CreateFromCurves`). Whether
+  `RebarStyle.StirrupTie` actually permits a 180-degree hook is the
+  load-bearing unverified item named in CONTEXT.md -- this fake does not
+  and cannot validate that; it only lets `rft.revit.stirrups` import and
+  run under CPython.
 """
 
 import math
@@ -161,16 +182,60 @@ class FakeRebarHostData(object):
 
 class FakeRebarStyle(object):
     Standard = object()
+    StirrupTie = object()
 
 
 class FakeRebarHookOrientation(object):
     Left = object()
 
 
+class FakeRebarHookType(object):
+    """SHAPE UNVERIFIED -- stand-in for `Autodesk.Revit.DB.Structure.
+    RebarHookType`. Real hook angle/multiplier live on the Revit-side
+    object; this fake only carries whatever a test assigns for assertion
+    purposes and proves nothing about whether StirrupTie permits 180 deg."""
+
+    def __init__(self, angle_deg=None):
+        self.angle_deg = angle_deg
+
+
+class FakeRebarShapeDrivenAccessor(object):
+    """SHAPE UNVERIFIED -- see tests/fake_revit_api.py module header."""
+
+    def __init__(self):
+        self.calls = []
+
+    def SetLayoutAsMaximumSpacing(self, spacing, array_length, bars_on_normal_side,
+                                   include_first_bar, include_last_bar):
+        self.calls.append(
+            {
+                "spacing": spacing,
+                "array_length": array_length,
+                "bars_on_normal_side": bars_on_normal_side,
+                "include_first_bar": include_first_bar,
+                "include_last_bar": include_last_bar,
+            }
+        )
+
+
+class FakeRebarInstance(object):
+    """SHAPE UNVERIFIED -- stand-in for the `Rebar` element returned by
+    `CreateFromCurves`. Real return type/members not confirmed; this only
+    records constructor args and hands back a fresh accessor per call."""
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self._accessor = FakeRebarShapeDrivenAccessor()
+
+    def GetShapeDrivenAccessor(self):
+        return self._accessor
+
+
 class FakeRebar(object):
     @staticmethod
     def CreateFromCurves(*args, **kwargs):
-        return {"args": args, "kwargs": kwargs}
+        return FakeRebarInstance(*args, **kwargs)
 
 
 class FakeRebarBarType(object):
@@ -193,9 +258,13 @@ class FakeGeometryInstance(object):
     """Stand-in for `Autodesk.Revit.DB.GeometryInstance` -- only used so
     `rft.revit.geometry` (which imports the real type at module scope for
     the rotation-aware column bounding box, issue #14 review finding #5)
-    remains importable under the fake environment. Not exercised by any
-    test yet: extracting real column geometry cannot be meaningfully
-    mocked without a live host (see docs/verification/s1-tracer-bullet.md).
+    remains importable under the fake environment.
+
+    Exercised by tests/test_geometry.py for both the column support-width
+    path and the beam section datum (issue #18 review), but only from the
+    ``GetBoundingBox()``/``Transform`` pair onward: whether a real host
+    hands back a GeometryInstance at all cannot be mocked meaningfully
+    (see docs/verification/s5-stirrups.md).
     """
 
     def __init__(self, local_bbox=None, transform=None):
@@ -230,6 +299,7 @@ def install():
     structure.Rebar = FakeRebar
     structure.RebarBarType = FakeRebarBarType
     structure.RebarFaceType = FakeRebarFaceType
+    structure.RebarHookType = FakeRebarHookType
 
     revit_pkg.DB = db
     autodesk_pkg.Revit = revit_pkg
