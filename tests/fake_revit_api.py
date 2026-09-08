@@ -67,6 +67,23 @@ Currently ``SHAPE UNVERIFIED``:
   place it is relied on for a second framing element, and that has not been
   confirmed against a live host either -- see
   ``rft/revit/guards.py:neighbour_axis_dot_product``.
+- ``RebarBarType.BarNominalDiameter`` (issue #20, S7) -- assumed to be a
+  read-only property in internal units carrying the catalog/nominal bar
+  diameter. Documentation also lists ``BarModelDiameter`` as a plausible
+  alternative; not confirmed against a live host which one the diameter
+  cross-check should read. See ``rft/revit/bar_types.py``.
+- ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)
+  .AsDouble()`` (issue #25) -- assumed to return the hook's own angle in
+  RADIANS. Whether this parameter exists on ``RebarHookType`` at all, and
+  whether it is the right member for the catalog hook's own fixed angle,
+  is unconfirmed against a live host. See ``rft/revit/bar_types.py``.
+- ``pyrevit.forms.SelectFromList.show(items, multiselect=False,
+  name_attr=..., title=..., button_name=...)`` (issue #20, S7) -- the
+  explicit dropdown/list picker used to select bar and hook types. This is
+  NOT faked here at all (``pyrevit`` itself is not importable in this
+  environment) -- the three pushbuttons' selection helpers are therefore
+  UNEXECUTED, not merely shape-unverified. See each pushbutton's own
+  module docstring and docs/verification/s7-grades.md.
 """
 
 import math
@@ -219,14 +236,40 @@ class FakeRebarHookOrientation(object):
     Left = object()
 
 
+class FakeRebarHookAngleParameter(object):
+    """SHAPE UNVERIFIED -- stand-in for the ``Parameter`` object
+    ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)`` is
+    assumed to return (issue #25). Real return type/member name not
+    confirmed; this only carries whatever angle a test assigns, in
+    radians, matching ``AsDouble()``'s assumed unit."""
+
+    def __init__(self, angle_deg):
+        self._angle_deg = angle_deg
+
+    def AsDouble(self):
+        return math.radians(self._angle_deg)
+
+
 class FakeRebarHookType(object):
     """SHAPE UNVERIFIED -- stand-in for `Autodesk.Revit.DB.Structure.
     RebarHookType`. Real hook angle/multiplier live on the Revit-side
     object; this fake only carries whatever a test assigns for assertion
-    purposes and proves nothing about whether StirrupTie permits 180 deg."""
+    purposes and proves nothing about whether StirrupTie permits 180 deg.
 
-    def __init__(self, angle_deg=None):
+    ``angle_deg=None`` simulates a hook type whose angle CANNOT be read
+    back at all (``get_Parameter`` returns None) -- issue #25's "unreadable"
+    case, distinct from an angle that reads back and fails the 180-degree
+    check.
+    """
+
+    def __init__(self, angle_deg=None, name=None):
         self.angle_deg = angle_deg
+        self.Name = name
+
+    def get_Parameter(self, _built_in_parameter):
+        if self.angle_deg is None:
+            return None
+        return FakeRebarHookAngleParameter(self.angle_deg)
 
 
 class FakeRebarShapeDrivenAccessor(object):
@@ -269,7 +312,19 @@ class FakeRebar(object):
 
 
 class FakeRebarBarType(object):
-    pass
+    """SHAPE UNVERIFIED -- ``BarNominalDiameter`` (issue #20, S7). See
+    tests/fake_revit_api.py header."""
+
+    def __init__(self, bar_nominal_diameter=None, name=None):
+        self.BarNominalDiameter = bar_nominal_diameter
+        self.Name = name
+
+
+class FakeBuiltInParameter(object):
+    """SHAPE UNVERIFIED -- ``REBAR_HOOK_ANGLE`` (issue #25). See
+    tests/fake_revit_api.py header."""
+
+    REBAR_HOOK_ANGLE = object()
 
 
 class FakeRebarFaceType(object):
@@ -338,6 +393,7 @@ def install():
     db.Options = FakeOptions
     db.GeometryInstance = FakeGeometryInstance
     db.Wall = FakeWall
+    db.BuiltInParameter = FakeBuiltInParameter
     db.Structure = structure
 
     structure.RebarHostData = FakeRebarHostData

@@ -127,6 +127,19 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Steel grades (S7, #20): every bar type is now an explicit selection, and
+  nothing falls back.** The §1.1/A34 role→grade mapping lives in
+  `rft/core/grades.py` as data — stirrups mild St 24/35, everything else
+  (including spacer bars, applied literally) high tensile St 36/52. All three
+  pushbuttons lost their resolve-by-name-with-fallback code: a missing
+  selection is a blocking error naming its condition and spec section, and
+  the typed diameter is cross-checked against the selected bar type's own
+  diameter before any placement math runs, so `LD`, layer offsets and the
+  stirrup rectangle can never be computed against a diameter that is not the
+  one being placed. `LD` fields now name the St 36/52 grade they assume
+  (A10). The stirrup hook is an explicit selection whose angle is read back
+  and blocked when it is not 180° (A33) — see #25 for what is still
+  unverified there.
 - **Continuous-run guard (S9, #22): a collinear neighbouring beam at either
   end now REFUSES placement, in all three pushbuttons, before any support
   detection or placement work.** Discriminates by angle, not category: a
@@ -148,14 +161,21 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
   may be calling a non-existent API form; if so it throws on first real run.
   Accepted deliberately, to be corrected on first live Revit test.
+- **#27 — A35's two bar-type selections cannot express different top and
+  bottom diameters.** In Revit a `RebarBarType` *is* a diameter, so one
+  high-tensile selection cannot place a Ø12 top bar and a Ø16 bottom bar.
+  Until this is decided, the tool details only beams whose top and bottom
+  main bars share a diameter — it refuses loudly rather than placing
+  wrong-diameter bars, but different top and bottom diameters is the normal
+  case, so this is the sharpest limitation in the tool today.
+- **#25 — the stirrup hook angle read-back is unverified.** The fallback
+  defect is fixed and a non-180° hook is now blocked, but whether
+  `RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)` is the
+  real shape is unconfirmed. An unreadable angle is reported as UNVERIFIED
+  rather than treated as a pass.
 - **#26 — the A7 clearance has no defined failure behaviour.** The tool warns
   and places anyway, which is a placeholder chosen to avoid inventing a
   detailing rule, not an answer. Needs a decision.
-- **Hook angle is not verified.** The stirrup pushbutton resolves
-  `RebarHookType` by name and falls back to the first one in the document. A
-  project whose first hook type is a 90° bend therefore gets non-compliant
-  stirrups (rev 2 §7.3, A33 requires 180°) with only a printed note. Reading
-  the angle back needs a parameter shape that cannot be confirmed here.
 - No code in this project has ever been executed against a live Revit host.
   Every API decision rests on documentation, and passing tests validate
   adapter *logic* only — never API shape. See `CONTEXT.md`.
@@ -178,4 +198,5 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #15 | S2 full end anchorage |
 | #16 | S3 cross-section layout |
 | #18 | S5 stirrups |
+| #20 | S7 steel grades and bar type resolution |
 | #22 | S9 out-of-scope configuration guards |

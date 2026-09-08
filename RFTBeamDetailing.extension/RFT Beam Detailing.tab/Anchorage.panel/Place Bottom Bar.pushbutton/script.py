@@ -19,7 +19,15 @@ from pyrevit import DB, forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.anchorage import DEFAULT_LD_BTM_MULTIPLIER, bottom_bar_anchorage, development_length
+from rft.core.grades import (
+    GRADE_HIGH_TENSILE,
+    ROLE_BOTTOM_MAIN,
+    bar_type_for_role,
+    diameter_consistency_message,
+    missing_bar_type_selection_message,
+)
 from rft.core.guards import no_support_detected_message
+from rft.revit.bar_types import bar_type_diameter_mm, list_bar_types
 from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
@@ -55,25 +63,29 @@ doc = revit.doc
 SUPPORT_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
 
 
-def resolve_bar_type(document, requested_name):
-    """A single provisional RebarBarType (S1 scope; grade selection is S7,
-    issue #20). Matches by name if given, else takes the first one found.
+def select_high_tensile_bar_type(document):
+    """Explicit selection of the high-tensile St 36/52 RebarBarType used
+    for the bottom main bar (rev 2 section 1.1, A34/A35; S7, issue #20) --
+    NO fallback to "the first one found". Returns None if the document has
+    no RebarBarType at all, or if the engineer cancels the picker.
+
+    SHAPE UNVERIFIED -- ``pyrevit.forms.SelectFromList.show(items,
+    multiselect=False, name_attr=..., title=..., button_name=...)`` is the
+    standard pyRevit dropdown/list-picker component; its exact signature
+    could not be confirmed against documentation in this environment (no
+    pyRevit installation here). This call itself has never executed --
+    see docs/verification/s7-grades.md.
     """
-    bar_types = list(
-        DB.FilteredElementCollector(document).OfClass(DB.Structure.RebarBarType)
-    )
+    bar_types = list_bar_types(document)
     if not bar_types:
-        raise HostValidationError("No RebarBarType exists in this document.")
-    if requested_name:
-        for bt in bar_types:
-            if bt.Name == requested_name:
-                return bt
-        output.print_md(
-            "*No RebarBarType named '{}' found -- falling back to '{}'.*".format(
-                requested_name, bar_types[0].Name
-            )
-        )
-    return bar_types[0]
+        return None
+    return forms.SelectFromList.show(
+        bar_types,
+        multiselect=False,
+        name_attr="Name",
+        title="Select high-tensile St 36/52 RebarBarType (bottom bar)",
+        button_name="Select",
+    )
 
 
 def ask_inputs():
@@ -84,8 +96,6 @@ def ask_inputs():
             int(DEFAULT_LD_BTM_MULTIPLIER)
         )),
         TextBox("ld_mult", Text=str(int(DEFAULT_LD_BTM_MULTIPLIER))),
-        Label("RebarBarType name (blank = first available):"),
-        TextBox("bar_type_name", Text=""),
         Button("Place bar"),
     ]
     form = FlexForm("S1 - Place bottom bar", components)
@@ -109,7 +119,25 @@ def main():
     values = ask_inputs()
     dia_btm_mm = float(values["dia_btm"])
     ld_mult = float(values["ld_mult"]) if values["ld_mult"] else DEFAULT_LD_BTM_MULTIPLIER
-    bar_type = resolve_bar_type(doc, values.get("bar_type_name"))
+
+    # --- S7 (issue #20): explicit RebarBarType selection, no fallback ----
+    high_tensile_bar_type = select_high_tensile_bar_type(doc)
+    if high_tensile_bar_type is None:
+        forms.alert(
+            missing_bar_type_selection_message(GRADE_HIGH_TENSILE).message,
+            title="RebarBarType selection required",
+        )
+        script.exit()
+    bar_type = bar_type_for_role(ROLE_BOTTOM_MAIN, mild_bar_type=None, high_tensile_bar_type=high_tensile_bar_type)
+
+    # --- this ticket's diameter-consistency trap: the typed O_BTM must
+    # agree with the selected type's own diameter, or LD/anchorage below
+    # would be computed against the wrong number with nothing showing it.
+    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
+    dia_mismatch = diameter_consistency_message("Bottom bar (Ø_BTM)", dia_btm_mm, bar_type_dia_mm)
+    if dia_mismatch:
+        forms.alert(dia_mismatch.message, title="Bar diameter does not match selected RebarBarType")
+        script.exit()
 
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)
     start_pt, end_pt = beam_endpoints(beam)

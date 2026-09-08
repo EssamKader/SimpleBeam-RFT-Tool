@@ -13,6 +13,15 @@ form is S8's scope (issue #21), not this ticket's.
 from pyrevit import DB, forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
+from rft.core.grades import (
+    GRADE_MILD,
+    ROLE_STIRRUP,
+    bar_type_for_role,
+    diameter_consistency_message,
+    hook_angle_guard_message,
+    missing_bar_type_selection_message,
+    missing_hook_type_selection_message,
+)
 from rft.core.guards import no_support_detected_message, stirrup_type3_guard_message
 from rft.core.stirrups import (
     ZONE_LAYOUT_FLAGS,
@@ -33,6 +42,7 @@ from rft.revit.geometry import (
     point_at_cc_offset,
     span_length_mm,
 )
+from rft.revit.bar_types import bar_type_diameter_mm, hook_angle_deg, list_bar_types, list_hook_types
 from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, validate_rebar_host
 from rft.revit.placement import bend_plane_normal, run_in_transaction
@@ -43,46 +53,54 @@ output = script.get_output()
 doc = revit.doc
 
 
-def resolve_bar_type(document, requested_name):
-    """The mild St 24/35 RebarBarType by name (rev 2 §7.3, §1.1). Matches
-    S1's ``resolve_bar_type`` pattern -- first available if unset/not found.
+def select_mild_bar_type(document):
+    """Explicit selection of the mild St 24/35 RebarBarType used for
+    stirrups (rev 2 section 7.3, section 1.1, A34/A35; S7, issue #20) --
+    NO fallback to "the first one found". Returns None if the document has
+    no RebarBarType at all, or if the engineer cancels the picker.
+
+    SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
+    docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
+    signature.
     """
-    bar_types = list(
-        DB.FilteredElementCollector(document).OfClass(DB.Structure.RebarBarType)
-    )
+    bar_types = list_bar_types(document)
     if not bar_types:
-        raise HostValidationError("No RebarBarType exists in this document.")
-    if requested_name:
-        for bt in bar_types:
-            if bt.Name == requested_name:
-                return bt
-        output.print_md(
-            "*No RebarBarType named '{}' found -- falling back to '{}'.*".format(
-                requested_name, bar_types[0].Name
-            )
-        )
-    return bar_types[0]
-
-
-def resolve_hook_type(document, requested_name):
-    """The 180 deg semicircular RebarHookType by name (rev 2 §7.3, A33).
-    Same fallback pattern as ``resolve_bar_type``.
-    """
-    hook_types = list(
-        DB.FilteredElementCollector(document).OfClass(DB.Structure.RebarHookType)
+        return None
+    return forms.SelectFromList.show(
+        bar_types,
+        multiselect=False,
+        name_attr="Name",
+        title="Select mild St 24/35 RebarBarType (stirrups)",
+        button_name="Select",
     )
+
+
+def select_hook_type(document):
+    """Explicit selection of the 180-degree RebarHookType used for
+    stirrups (rev 2 section 7.3, A33; issue #25) -- NO fallback to "the
+    first one found". Returns None if the document has no RebarHookType at
+    all, or if the engineer cancels the picker.
+
+    Whether the picked type's angle is ACTUALLY 180 degrees is checked
+    separately, after selection, in ``main`` -- via ``hook_angle_deg``,
+    which may itself come back unable to confirm the angle at all (issue
+    #25's second open question). This function only removes the
+    name-matching fallback; it does not and cannot validate the angle.
+
+    SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
+    docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
+    signature.
+    """
+    hook_types = list_hook_types(document)
     if not hook_types:
-        raise HostValidationError("No RebarHookType exists in this document.")
-    if requested_name:
-        for ht in hook_types:
-            if ht.Name == requested_name:
-                return ht
-        output.print_md(
-            "*No RebarHookType named '{}' found -- falling back to '{}'.*".format(
-                requested_name, hook_types[0].Name
-            )
-        )
-    return hook_types[0]
+        return None
+    return forms.SelectFromList.show(
+        hook_types,
+        multiselect=False,
+        name_attr="Name",
+        title="Select 180-degree RebarHookType (stirrups)",
+        button_name="Select",
+    )
 
 
 def ask_inputs():
@@ -97,10 +115,6 @@ def ask_inputs():
         TextBox("normal_spacing", Text="200"),
         Label("Closure type (1, 2 or 4 -- 3 is parked):"),
         TextBox("closure_type", Text="1"),
-        Label("RebarBarType name, mild St 24/35 (blank = first available):"),
-        TextBox("bar_type_name", Text=""),
-        Label("RebarHookType name, 180 deg (blank = first available):"),
-        TextBox("hook_type_name", Text=""),
         Button("Place stirrups"),
     ]
     form = FlexForm("S5 - Place stirrups", components)
@@ -127,8 +141,43 @@ def main():
     dense_spacing_mm = float(values["dense_spacing"])
     normal_spacing_mm = float(values["normal_spacing"])
     closure_type = int(values["closure_type"])
-    bar_type = resolve_bar_type(doc, values.get("bar_type_name"))
-    hook_type = resolve_hook_type(doc, values.get("hook_type_name"))
+
+    # --- S7 (issue #20): explicit RebarBarType/RebarHookType selection,
+    # no fallback ----------------------------------------------------------
+    mild_bar_type = select_mild_bar_type(doc)
+    if mild_bar_type is None:
+        forms.alert(
+            missing_bar_type_selection_message(GRADE_MILD).message,
+            title="RebarBarType selection required",
+        )
+        script.exit()
+    bar_type = bar_type_for_role(ROLE_STIRRUP, mild_bar_type=mild_bar_type, high_tensile_bar_type=None)
+
+    hook_type = select_hook_type(doc)
+    if hook_type is None:
+        forms.alert(missing_hook_type_selection_message().message, title="RebarHookType selection required")
+        script.exit()
+
+    # --- this ticket's diameter-consistency trap -------------------------
+    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
+    dia_mismatch = diameter_consistency_message("Stirrup (Ø_stirrup)", dia_stirrup_mm, bar_type_dia_mm)
+    if dia_mismatch:
+        forms.alert(dia_mismatch.message, title="Bar diameter does not match selected RebarBarType")
+        script.exit()
+
+    # --- issue #25: read back the selected hook's own angle where
+    # possible and BLOCK if it is not 180 degrees. If it cannot be read
+    # back at all, this does NOT block -- it is reported as UNVERIFIED in
+    # the output below (issue #25 stays open for a live-host session
+    # rather than being falsely closed by an assumption).
+    hook_type_name = getattr(hook_type, "Name", None)
+    hook_angle_deg_value = hook_angle_deg(hook_type)
+    hook_angle_unverified = hook_angle_deg_value is None
+    if not hook_angle_unverified:
+        hook_angle_violation = hook_angle_guard_message(hook_angle_deg_value, hook_type_name=hook_type_name or "")
+        if hook_angle_violation:
+            forms.alert(hook_angle_violation.message, title="Stirrup hook angle is not 180 degrees")
+            script.exit()
 
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)
     start_pt, end_pt = beam_endpoints(beam)
@@ -212,6 +261,23 @@ def main():
         "Cover={:.1f}, O_stirrup={:.1f})".format(width_mm, height_mm, b_mm, h_mm, cover_mm, dia_stirrup_mm)
     )
     output.print_md("- L (c/c) = {:.1f} mm, closure type = {}".format(l_mm, closure_type))
+
+    # --- issue #25: exactly which hook type was used, and whether its
+    # angle could be verified, always printed regardless of the outcome.
+    if hook_angle_unverified:
+        output.print_md(
+            "- **Hook type used: '{}'.** Its angle could NOT be read back "
+            "and verified against the required 180 degrees (rev 2 section "
+            "7.3, A33) -- see issue #25, still open. Confirm the 180-degree "
+            "angle manually before relying on this beam's stirrups.".format(
+                hook_type_name or "<unnamed>"
+            )
+        )
+    else:
+        output.print_md(
+            "- Hook type used: '{}', angle read back and verified = {:.1f} "
+            "degrees (rev 2 section 7.3, A33).".format(hook_type_name or "<unnamed>", hook_angle_deg_value)
+        )
 
     beam_total = 0
     u_dir, v_dir = beam_section_axes(beam)

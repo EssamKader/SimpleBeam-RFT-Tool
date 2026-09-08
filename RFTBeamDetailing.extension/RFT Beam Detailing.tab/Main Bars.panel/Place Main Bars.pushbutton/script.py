@@ -21,8 +21,9 @@ SCOPE BOUNDARIES (see this ticket's report for the full rationale):
 - Spacer bars: only ``spacer_length_mm`` is computed and reported. Rev 2
   section 6.3 gives a length and no longitudinal spacing rule, so no
   spacer bar is placed -- guessing one is prohibited by CONTEXT.md.
-- Steel-grade (RebarBarType) resolution follows S1/S5's by-name-with-
-  fallback pattern; grade logic itself is S7 (#20).
+- Steel-grade (RebarBarType) resolution is now S7's explicit, no-fallback
+  selection (issue #20): one high-tensile RebarBarType, picked from a
+  dropdown, used for both top and bottom bars (rev 2 section 1.1, A34).
 - "Place Bottom Bar.pushbutton" (S1) and "Place Stirrups.pushbutton" (S5)
   keep their original both-ends-supported assumption; only THIS pushbutton
   (already S3's, the one #15's ticket named) gets S2's full unsupported-
@@ -45,6 +46,14 @@ from rft.core.anchorage import (
     unsupported_end_anchorage,
     unsupported_end_straight_run_mm,
 )
+from rft.core.grades import (
+    GRADE_HIGH_TENSILE,
+    ROLE_BOTTOM_MAIN,
+    ROLE_TOP_MAIN,
+    bar_type_for_role,
+    diameter_consistency_message,
+    missing_bar_type_selection_message,
+)
 from rft.core.layout import (
     MAX_LAYERS,
     corner_bar_u_positions_mm,
@@ -52,6 +61,7 @@ from rft.core.layout import (
     spacer_diameter_warning,
     spacer_length_mm,
 )
+from rft.revit.bar_types import bar_type_diameter_mm, list_bar_types
 from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
@@ -107,25 +117,34 @@ BEAM_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
 BEAM_END_FACE_TYPE = DB.Structure.RebarFaceType.Other
 
 
-def resolve_bar_type(document, requested_name):
-    """A single provisional RebarBarType (grade selection is S7, #20).
-    Matches S1/S5's by-name-with-fallback pattern.
+def select_high_tensile_bar_type(document):
+    """Explicit selection of the high-tensile St 36/52 RebarBarType used
+    for BOTH the top and bottom main bars (rev 2 section 1.1, A34/A35; S7,
+    issue #20) -- NO fallback to "the first one found". Returns None if
+    the document has no RebarBarType at all, or if the engineer cancels.
+
+    ONE selection covers both faces here because both roles map to the
+    SAME grade (A34): top main bars and bottom main bars are both high
+    tensile. See this ticket's report for the resulting tension when
+    Ø_TOP != Ø_BTM (the default 12/16 mm case) -- only one of the two
+    typed diameters can agree with a single selected type's own diameter,
+    surfaced by the diameter-consistency check below rather than resolved
+    here.
+
+    SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
+    docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
+    signature.
     """
-    bar_types = list(
-        DB.FilteredElementCollector(document).OfClass(DB.Structure.RebarBarType)
-    )
+    bar_types = list_bar_types(document)
     if not bar_types:
-        raise HostValidationError("No RebarBarType exists in this document.")
-    if requested_name:
-        for bt in bar_types:
-            if bt.Name == requested_name:
-                return bt
-        output.print_md(
-            "*No RebarBarType named '{}' found -- falling back to '{}'.*".format(
-                requested_name, bar_types[0].Name
-            )
-        )
-    return bar_types[0]
+        return None
+    return forms.SelectFromList.show(
+        bar_types,
+        multiselect=False,
+        name_attr="Name",
+        title="Select high-tensile St 36/52 RebarBarType (top + bottom bars)",
+        button_name="Select",
+    )
 
 
 def ask_inputs():
@@ -156,8 +175,6 @@ def ask_inputs():
             int(DEFAULT_LD_BTM_MULTIPLIER)
         )),
         TextBox("ld_btm_mult", Text=str(int(DEFAULT_LD_BTM_MULTIPLIER))),
-        Label("RebarBarType name (blank = first available):"),
-        TextBox("bar_type_name", Text=""),
         Button("Place main bars (top + bottom)"),
     ]
     form = FlexForm("S2/S3 - Main bar layout and end anchorage", components)
@@ -227,7 +244,38 @@ def main():
     layers_btm = int(values["layers_btm"])
     ld_top_mult = float(values["ld_top_mult"]) if values["ld_top_mult"] else DEFAULT_LD_TOP_MULTIPLIER
     ld_btm_mult = float(values["ld_btm_mult"]) if values["ld_btm_mult"] else DEFAULT_LD_BTM_MULTIPLIER
-    bar_type = resolve_bar_type(doc, values.get("bar_type_name"))
+
+    # --- S7 (issue #20): explicit RebarBarType selection, no fallback ----
+    high_tensile_bar_type = select_high_tensile_bar_type(doc)
+    if high_tensile_bar_type is None:
+        forms.alert(
+            missing_bar_type_selection_message(GRADE_HIGH_TENSILE).message,
+            title="RebarBarType selection required",
+        )
+        script.exit()
+    bar_type = bar_type_for_role(ROLE_TOP_MAIN, mild_bar_type=None, high_tensile_bar_type=high_tensile_bar_type)
+
+    # --- this ticket's diameter-consistency trap: both Ø_TOP and Ø_BTM
+    # are checked against the ONE selected high-tensile type's own
+    # diameter -- since A34 assigns the SAME grade to both roles and A35
+    # nominates only one RebarBarType per grade, a beam with Ø_TOP !=
+    # Ø_BTM (the default 12/16 mm case) can only ever agree with one of
+    # them. Both are checked and reported rather than silently choosing a
+    # side -- see this ticket's report for why this is a surfaced spec
+    # tension, not a resolved one.
+    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
+    dia_mismatches = [
+        m for m in (
+            diameter_consistency_message("Top bar (Ø_TOP)", dia_top_mm, bar_type_dia_mm),
+            diameter_consistency_message("Bottom bar (Ø_BTM)", dia_btm_mm, bar_type_dia_mm),
+        ) if m is not None
+    ]
+    if dia_mismatches:
+        forms.alert(
+            "\n\n".join(m.message for m in dia_mismatches),
+            title="Bar diameter does not match selected RebarBarType",
+        )
+        script.exit()
 
     try:
         cover_top_mm = read_face_cover_mm(

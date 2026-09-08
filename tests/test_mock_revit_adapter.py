@@ -13,7 +13,13 @@ de-duplication-guard mitigation on `SetLayoutAsMaximumSpacing`.
 
 import pytest
 
-from fake_revit_api import FakeElementId, FakeRebarHookType, FakeTransaction, FakeXYZ
+from fake_revit_api import (
+    FakeElementId,
+    FakeRebarBarType,
+    FakeRebarHookType,
+    FakeTransaction,
+    FakeXYZ,
+)
 
 from rft.revit.host import HostValidationError, read_face_cover_mm, validate_rebar_host
 from rft.revit.placement import (
@@ -559,3 +565,63 @@ def test_build_main_bar_curves_both_ends_unsupported_is_a_single_straight_segmen
     assert len(curves) == 1
     assert curves[0][1] == corner_start
     assert curves[0][2] == corner_end
+
+
+# --- Issue #20 (S7): RebarBarType/RebarHookType read-back -------------------
+
+
+def test_bar_type_diameter_mm_reads_back_bar_nominal_diameter():
+    from rft.revit.bar_types import bar_type_diameter_mm
+
+    bar_type = FakeRebarBarType(bar_nominal_diameter=16.0 / 304.8, name="High Tensile 16mm")
+    assert bar_type_diameter_mm(bar_type, from_internal_units=lambda v: v * 304.8) == pytest.approx(16.0)
+
+
+def test_list_bar_types_and_hook_types_return_collector_items(monkeypatch):
+    from fake_revit_api import FakeFilteredElementCollector
+    from rft.revit.bar_types import list_bar_types, list_hook_types
+
+    bar_type = FakeRebarBarType(bar_nominal_diameter=16.0, name="High Tensile 16mm")
+    hook_type = FakeRebarHookType(angle_deg=180, name="Standard-180")
+    monkeypatch.setattr(FakeFilteredElementCollector, "_ITEMS", [bar_type, hook_type])
+
+    assert list_bar_types(None) == [bar_type, hook_type]
+    assert list_hook_types(None) == [bar_type, hook_type]
+
+
+def test_hook_angle_deg_reads_back_180_from_a_readable_hook_type():
+    from rft.revit.bar_types import hook_angle_deg
+
+    hook_type = FakeRebarHookType(angle_deg=180, name="Standard-180")
+    assert hook_angle_deg(hook_type) == pytest.approx(180.0)
+
+
+def test_hook_angle_deg_reads_back_a_non_180_angle_without_judging_it():
+    """Reading back is separate from judging (rft.core.grades.
+    hook_angle_guard_message does the judging) -- this only proves the
+    read-back itself is faithful to whatever the fake carries."""
+    from rft.revit.bar_types import hook_angle_deg
+
+    hook_type = FakeRebarHookType(angle_deg=90, name="Standard-90")
+    assert hook_angle_deg(hook_type) == pytest.approx(90.0)
+
+
+def test_hook_angle_deg_returns_none_when_unreadable():
+    """Issue #25's 'cannot be read back at all' case: get_Parameter comes
+    back None. Must return None, not raise and not guess 180."""
+    from rft.revit.bar_types import hook_angle_deg
+
+    hook_type = FakeRebarHookType(angle_deg=None, name="Unknown hook")
+    assert hook_angle_deg(hook_type) is None
+
+
+def test_hook_angle_deg_returns_none_when_get_parameter_is_missing_entirely():
+    """A hook-type stand-in with no get_Parameter method at all (a
+    different, equally plausible wrong-shape scenario) must also come back
+    None rather than raising AttributeError up into the pushbutton."""
+    from rft.revit.bar_types import hook_angle_deg
+
+    class _NoParameterHookType(object):
+        pass
+
+    assert hook_angle_deg(_NoParameterHookType()) is None
