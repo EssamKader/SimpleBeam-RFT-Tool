@@ -19,6 +19,7 @@ from pyrevit import DB, forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.anchorage import DEFAULT_LD_BTM_MULTIPLIER, bottom_bar_anchorage, development_length
+from rft.core.guards import no_support_detected_message
 from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
@@ -29,6 +30,7 @@ from rft.revit.geometry import (
     span_length_mm,
     start_support_face_point,
 )
+from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, read_support_cover_mm, validate_rebar_host
 from rft.revit.placement import bend_plane_normal, build_bottom_bar_curves, place_anchored_bar, run_in_transaction
 from rft.revit.units import internal_to_mm, mm_to_internal
@@ -113,13 +115,34 @@ def main():
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
 
+    # --- S9 guard, run BEFORE any placement work (rev 2 section 9 item 2,
+    # A39): a collinear neighbouring beam at either end makes this a
+    # continuous run, not a single span, regardless of whether a column is
+    # ALSO present there. REFUSED, not warned -- see
+    # rft.core.guards.continuous_run_guard_message for the policy rationale.
+    continuous_guards = [
+        g for g in (
+            continuous_run_guard(doc, beam, start_pt, mm_to_internal, "Start end", exclude_element_id=beam.Id),
+            continuous_run_guard(doc, beam, end_pt, mm_to_internal, "End end", exclude_element_id=beam.Id),
+        ) if g is not None
+    ]
+    if continuous_guards:
+        forms.alert(
+            "\n\n".join(g.message for g in continuous_guards),
+            title="Continuous run detected -- refused",
+        )
+        script.exit()
+
     col_start = find_supporting_element(doc, start_pt, mm_to_internal, exclude_element_id=beam.Id)
     col_end = find_supporting_element(doc, end_pt, mm_to_internal, exclude_element_id=beam.Id)
     if col_start is None or col_end is None:
+        missing = [
+            no_support_detected_message(label)
+            for label, found in (("Start end", col_start), ("End end", col_end))
+            if found is None
+        ]
         forms.alert(
-            "No supporting element (column, wall or girder) detected at one or both ends. S1 assumes "
-            "a column at both ends -- other support types and the "
-            "no-support path are S2 (issue #15).",
+            "\n\n".join(g.message for g in missing),
             title="Unsupported configuration",
         )
         script.exit()

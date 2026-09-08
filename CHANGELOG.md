@@ -92,6 +92,14 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   stops with how much anchorage it achieves. An unsupported end achieves
   **0 mm** of embedment; the bar's termination short of the beam end is now
   reported as the separate fact it is.
+- **Collinearity was tested by direction alone, found reviewing #22.** A
+  neighbour merely running *parallel* to the beam scores a perfect
+  direction match, and the search is a proximity test around the beam end —
+  so twin beams a few hundred millimetres apart, or an edge beam alongside a
+  floor beam, would have been refused as a "continuous run". Collinear means
+  same direction **and** same line; the neighbour's perpendicular offset
+  from the beam's own axis line is now checked too, with a 50 mm tolerance
+  to absorb modelling slop.
 - **Horizontal dimensions read off the wrong cover, found reviewing #16.**
   The corner-bar rule and the spacer length are horizontal dimensions across
   the section, but were computed from the top or bottom face cover — so the
@@ -119,6 +127,21 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Continuous-run guard (S9, #22): a collinear neighbouring beam at either
+  end now REFUSES placement, in all three pushbuttons, before any support
+  detection or placement work.** Discriminates by angle, not category: a
+  beam framing into a transverse girder still passes (§2.4, a valid single
+  span); a collinear neighbouring beam is refused even when a column is
+  ALSO present at that end -- the dangerous case this guard exists for. The
+  45-degree angular tolerance and the 50 mm lateral tolerance are this
+  ticket's own design choices, not spec rules, and are flagged as such in
+  `rft/core/guards.py`. **Refusing rather than warning is now the project
+  owner's decision** (A41), closing the either/or latitude A39 left open. Cantilever/free-end warnings
+  (A14) and the stirrup type 3 rejection (A31) were already implemented;
+  this ticket wires both into all three pushbuttons and makes every
+  rejection/warning name its condition and spec section via a
+  `GuardMessage(condition, spec_section, message)` result, never a bare
+  string. See `docs/verification/s9-guards.md`.
 
 ### Known risks
 
@@ -128,11 +151,6 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#26 — the A7 clearance has no defined failure behaviour.** The tool warns
   and places anyway, which is a placeholder chosen to avoid inventing a
   detailing rule, not an answer. Needs a decision.
-- **A beam in a continuous run is now detectable as "supported".** Since
-  support detection includes structural framing (needed for girder supports,
-  §2.4/A9), a beam framing into another beam collinear with it will be
-  detailed as simply supported without complaint. The continuous-run guard is
-  #22 (S9), and until it lands this is the sharpest edge in the tool.
 - **Hook angle is not verified.** The stirrup pushbutton resolves
   `RebarHookType` by name and falls back to the first one in the document. A
   project whose first hook type is a 90° bend therefore gets non-compliant
@@ -160,3 +178,4 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #15 | S2 full end anchorage |
 | #16 | S3 cross-section layout |
 | #18 | S5 stirrups |
+| #22 | S9 out-of-scope configuration guards |

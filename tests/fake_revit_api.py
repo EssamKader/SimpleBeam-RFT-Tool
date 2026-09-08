@@ -60,6 +60,13 @@ Currently ``SHAPE UNVERIFIED``:
   ``FilteredElementCollector.OfCategory`` arguments for support detection
   (issue #15, S2) -- assumed to exist and behave like ``OST_StructuralColumns``
   already did; not newly confirmed here.
+- A SECOND, independently-picked ``OST_StructuralFraming`` neighbour
+  (issue #22, S9 continuous-run guard) exposing ``Location.Curve`` the same
+  way the beam being detailed does. ``beam_axis_direction``/``beam_endpoints``
+  already carried this assumption for the beam itself; this is the first
+  place it is relied on for a second framing element, and that has not been
+  confirmed against a live host either -- see
+  ``rft/revit/guards.py:neighbour_axis_dot_product``.
 """
 
 import math

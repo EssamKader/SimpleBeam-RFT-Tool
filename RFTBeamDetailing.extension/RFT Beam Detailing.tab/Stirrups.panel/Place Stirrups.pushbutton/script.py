@@ -13,8 +13,8 @@ form is S8's scope (issue #21), not this ticket's.
 from pyrevit import DB, forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
+from rft.core.guards import no_support_detected_message, stirrup_type3_guard_message
 from rft.core.stirrups import (
-    TYPE3_PARKED_MESSAGE,
     ZONE_LAYOUT_FLAGS,
     centreline_leg_dimensions_mm,
     stirrup_count_and_spacing,
@@ -33,6 +33,7 @@ from rft.revit.geometry import (
     point_at_cc_offset,
     span_length_mm,
 )
+from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, validate_rebar_host
 from rft.revit.placement import bend_plane_normal, run_in_transaction
 from rft.revit.stirrups import apply_maximum_spacing_layout, build_stirrup_curves, place_stirrup
@@ -133,12 +134,32 @@ def main():
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
 
+    # --- S9 guard, run BEFORE any placement work (rev 2 section 9 item 2,
+    # A39) -- see "Place Bottom Bar.pushbutton" for the same wiring and its
+    # rationale.
+    continuous_guards = [
+        g for g in (
+            continuous_run_guard(doc, beam, start_pt, mm_to_internal, "Start end", exclude_element_id=beam.Id),
+            continuous_run_guard(doc, beam, end_pt, mm_to_internal, "End end", exclude_element_id=beam.Id),
+        ) if g is not None
+    ]
+    if continuous_guards:
+        forms.alert(
+            "\n\n".join(g.message for g in continuous_guards),
+            title="Continuous run detected -- refused",
+        )
+        script.exit()
+
     col_start = find_supporting_element(doc, start_pt, mm_to_internal, exclude_element_id=beam.Id)
     col_end = find_supporting_element(doc, end_pt, mm_to_internal, exclude_element_id=beam.Id)
     if col_start is None or col_end is None:
+        missing = [
+            no_support_detected_message(label)
+            for label, found in (("Start end", col_start), ("End end", col_end))
+            if found is None
+        ]
         forms.alert(
-            "No supporting element (column, wall or girder) detected at one or both ends. This tool "
-            "assumes a column at both ends (S1 scope carried into S5).",
+            "\n\n".join(g.message for g in missing),
             title="Unsupported configuration",
         )
         script.exit()
@@ -155,12 +176,17 @@ def main():
         forms.alert(str(ex), title="Degenerate zone")
         script.exit()
 
+    # --- S9 guard (rev 2 section 7.2, A31): stirrup type 3 is rejected
+    # outright, before any zone/leg-geometry computation runs.
+    if closure_type == 3:
+        forms.alert(stirrup_type3_guard_message().message, title="Stirrup type 3 is parked")
+        script.exit()
+
     try:
         width_mm, height_mm = centreline_leg_dimensions_mm(b_mm, h_mm, cover_mm, dia_stirrup_mm)
         endpoints_mm = stirrup_curve_endpoints_mm(closure_type, width_mm, height_mm)
     except ValueError as ex:
-        title = "Stirrup type 3 is parked" if closure_type == 3 else "Invalid stirrup geometry"
-        forms.alert(str(ex), title=title)
+        forms.alert(str(ex), title="Invalid stirrup geometry")
         script.exit()
 
     zone_specs = [

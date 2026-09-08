@@ -63,6 +63,7 @@ from rft.revit.geometry import (
     start_support_face_point,
     support_width_along_axis_mm,
 )
+from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, read_face_cover_mm, read_support_cover_mm, validate_rebar_host
 from rft.revit.placement import (
     bar_point_at_uv,
@@ -250,6 +251,25 @@ def main():
     axis = beam_axis_direction(beam)
     u_dir, v_dir = beam_section_axes(beam)
 
+    # --- S9 guard, run BEFORE any placement work (rev 2 section 9 item 2,
+    # A39): a collinear neighbouring beam at either end makes this a
+    # continuous run, not a single span, regardless of whether a column or
+    # girder is ALSO present at that end -- see
+    # rft.core.guards.continuous_run_guard_message for the policy
+    # rationale (REFUSED, not warned, under A39's explicit latitude).
+    continuous_guards = [
+        g for g in (
+            continuous_run_guard(doc, beam, start_pt, mm_to_internal, "Start end", exclude_element_id=beam.Id),
+            continuous_run_guard(doc, beam, end_pt, mm_to_internal, "End end", exclude_element_id=beam.Id),
+        ) if g is not None
+    ]
+    if continuous_guards:
+        forms.alert(
+            "\n\n".join(g.message for g in continuous_guards),
+            title="Continuous run detected -- refused",
+        )
+        script.exit()
+
     # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end,
     # any support type -- a missing support takes the unsupported path,
     # never a hard stop, so top/bottom anchorage can be computed at both
@@ -261,12 +281,14 @@ def main():
 
     if not is_supported_start and not is_supported_end:
         forms.alert(
-            "No support detected at EITHER end. This tool details a "
-            "single-span, simply-supported beam (rev 2 scope) -- a beam "
-            "with no support at all is not a span and is refused rather "
-            "than silently detailed (this specific guard is this "
-            "ticket's own judgement call, not a rev 2 rule -- see this "
-            "ticket's report).",
+            "No support (column, wall or girder) detected at EITHER end "
+            "(rev 2 section 2.4/2.5, A9/A12/A14). This tool details a "
+            "single-span, simply-supported beam -- a beam with no support "
+            "at all is not a span and is refused outright rather than "
+            "silently detailed (this specific hard-stop is this project's "
+            "own judgement call, not a rev 2 rule; A14's own requirement is "
+            "only to WARN at a free end, which is what happens below when "
+            "just ONE end is unsupported).",
             title="No support detected",
         )
         script.exit()
