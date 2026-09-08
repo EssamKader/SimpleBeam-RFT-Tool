@@ -55,6 +55,11 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   `SetLayoutAsMaximumSpacing` rebar sets clipped to the clear region with
   dense spacing at the supports, all inside one transaction, plus a per-zone
   and beam-total report. New `Stirrups.panel` pushbutton. 58 tests.
+- **S3 cross-section bar layout** (#16): first-layer and stacked-layer
+  offsets for both faces, the corner-bar distribution rule, spacer length,
+  and the R1 non-blocking spacer warning. New `Main Bars.panel` pushbutton
+  places the bottom-face bars through S1's anchorage machinery, one per
+  layer x corner position, in one transaction. 91 tests.
 
 ### Fixed
 
@@ -67,6 +72,14 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   beam's own local bounding box and instance transform, the technique S1's
   review already adopted for rotated columns. The second half was
   pre-existing in S1 and only became visible once S5 consumed `b`.
+- **Horizontal dimensions read off the wrong cover, found reviewing #16.**
+  The corner-bar rule and the spacer length are horizontal dimensions across
+  the section, but were computed from the top or bottom face cover — so the
+  top and bottom layers came out at different horizontal positions in the same
+  beam, and §6.3's single spacer length was reported as two contradictory
+  values. Both now use the beam's side cover, read once. This is the third
+  wrong-cover-face defect in the project (after S1's column cover), so it is
+  worth checking first on #17 and #19.
 - **Reported stirrup counts contradicted the placement flags, found reviewing
   #18.** The count ignored the R4 de-duplication flags, so the normal zone
   reported 11 stirrups where 9 are placed. The flags are now a required
@@ -116,4 +129,5 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #9 | UI scope decisions |
 | #13 | Steel grade requirement |
 | #14 | S1 tracer bullet |
+| #16 | S3 cross-section layout |
 | #18 | S5 stirrups |

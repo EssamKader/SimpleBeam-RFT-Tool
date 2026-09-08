@@ -65,6 +65,28 @@ def build_bottom_bar_curves(face_start, face_end, axis_direction, bend_direction
     ]
 
 
+def bar_face_points_at_uv(face_start, face_end, u_dir, v_dir,
+                          du_internal, dv_internal, u_mm, v_mm, to_internal_units):
+    """The two support-face points (internal units) for ONE bar within a
+    layer/corner-bar layout, at local (u, v) mm offset from the section
+    CENTROID (issue #16, S3, rev 2 sections 4/6.1).
+
+    `face_start`/`face_end` are the on-axis support-face points S1 already
+    builds (``start_support_face_point``/``end_support_face_point``), sat
+    on the beam's LOCATION CURVE, not its centroid. `du_internal`/
+    `dv_internal` (``beam_section_centre_offsets``) carry that curve-to-
+    centroid correction; `u_mm`/`v_mm` (``rft.core.layout``) are then
+    added on top, in the SAME (u, v) axes, so a bar's centroid-local
+    coordinate reaches the right point on the support face without
+    re-deriving the datum this ticket's geometry helpers already fixed
+    (issue #18 review findings #1/#2).
+    """
+    u_total_internal = du_internal + to_internal_units(u_mm)
+    v_total_internal = dv_internal + to_internal_units(v_mm)
+    lateral_offset = u_dir.Multiply(u_total_internal) + v_dir.Multiply(v_total_internal)
+    return face_start + lateral_offset, face_end + lateral_offset
+
+
 def place_anchored_bar(doc, host, bar_type, curves, norm):
     """Rebar.CreateFromCurves, RebarStyle.Standard, no hooks -- the bent
     curve list IS the anchorage (rev 2 section 2.3 note A13, section 10).

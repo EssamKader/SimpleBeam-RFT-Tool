@@ -16,7 +16,12 @@ import pytest
 from fake_revit_api import FakeElementId, FakeRebarHookType, FakeTransaction, FakeXYZ
 
 from rft.revit.host import HostValidationError, read_face_cover_mm, validate_rebar_host
-from rft.revit.placement import bend_plane_normal, build_bottom_bar_curves, run_in_transaction
+from rft.revit.placement import (
+    bar_face_points_at_uv,
+    bend_plane_normal,
+    build_bottom_bar_curves,
+    run_in_transaction,
+)
 from rft.revit.stirrups import apply_maximum_spacing_layout, build_stirrup_curves, place_stirrup
 from rft.core.stirrups import (
     ZONE_LAYOUT_FLAGS,
@@ -222,6 +227,51 @@ def test_bottom_bar_curve_list_has_exactly_three_segments_no_hooks():
     # Both bend legs go upward (Z increases from the corner).
     assert bend_a_line[1].Z > corner_start.Z  # bend_end_start above corner_start
     assert bend_b_line[2].Z > corner_end.Z  # bend_end_end above corner_end
+
+
+# --- Issue #16 (S3): main bar cross-section layout -> support-face points ---
+
+
+def test_bar_face_points_at_uv_applies_centroid_correction_and_bar_offset():
+    """Issue #16: du/dv (curve-to-centroid correction) and the bar's own
+    (u, v) mm coordinate must BOTH land in the final face point -- neither
+    alone is correct (issue #18 review findings #1/#2, reused here)."""
+    face_start = FakeXYZ(0, 0, 0)
+    face_end = FakeXYZ(6000, 0, 0)
+    u_dir = FakeXYZ(0, 1, 0)
+    v_dir = FakeXYZ(0, 0, 1)
+
+    bar_start, bar_end = bar_face_points_at_uv(
+        face_start, face_end, u_dir, v_dir,
+        du_internal=10.0, dv_internal=-300.0,  # centroid correction, internal units
+        u_mm=107.0, v_mm=-257.0,  # bar's own centroid-local (u, v), mm
+        to_internal_units=_to_internal,
+    )
+
+    expected_u_internal = 10.0 + _to_internal(107.0)
+    expected_v_internal = -300.0 + _to_internal(-257.0)
+    assert bar_start.X == pytest.approx(0.0)
+    assert bar_start.Y == pytest.approx(expected_u_internal)
+    assert bar_start.Z == pytest.approx(expected_v_internal)
+    assert bar_end.X == pytest.approx(6000.0)
+    assert bar_end.Y == pytest.approx(expected_u_internal)
+    assert bar_end.Z == pytest.approx(expected_v_internal)
+
+
+def test_bar_face_points_at_uv_matches_plain_offset_when_centroid_correction_is_zero():
+    face_start = FakeXYZ(0, 0, 0)
+    face_end = FakeXYZ(6000, 0, 0)
+    u_dir = FakeXYZ(0, 1, 0)
+    v_dir = FakeXYZ(0, 0, 1)
+
+    bar_start, bar_end = bar_face_points_at_uv(
+        face_start, face_end, u_dir, v_dir,
+        du_internal=0.0, dv_internal=0.0,
+        u_mm=100.0, v_mm=200.0,
+        to_internal_units=_to_internal,
+    )
+    assert bar_start.Y == pytest.approx(_to_internal(100.0))
+    assert bar_start.Z == pytest.approx(_to_internal(200.0))
 
 
 def test_bend_plane_normal_is_perpendicular_to_both_legs():
