@@ -96,6 +96,14 @@ API code**, so the pure core is the only part that can genuinely be tested.
   objects demonstrating the logic is correct. `CONTEXT.md` requires this
   before a ticket can close, and it is the actual safety net here — not
   optional polish.
+- **Declare unverified API shapes in the fakes.** A mock is written to match
+  the shape you *assumed*, so a green suite proves your logic is
+  self-consistent — never that the real API has those members, signatures or
+  return types. Any fake standing in for an API whose shape you could not
+  confirm from documentation must carry an inline `SHAPE UNVERIFIED` note
+  saying what you assumed and what the docs suggest instead, and be added to
+  the running list in `tests/fake_revit_api.py`'s header. Passing tests must
+  never be mistakable for API validation.
 
 ### Do not commit
 

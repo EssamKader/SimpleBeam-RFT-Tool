@@ -50,5 +50,19 @@ mock-object simulation write-up** demonstrating the logic is correct before it
 can close in review. That write-up is the actual safety net here, not optional
 polish.
 
+### Mock fakes must declare unverified API shapes
+
+Mock objects are written to match the API shape the adapter *assumes*. A green
+test suite therefore proves the adapter's **logic** is self-consistent — it does
+**not** prove the real Revit API has those members, signatures or return types.
+When an assumed shape is wrong, the tests pass and the tool still throws on its
+first real run.
+
+So: every fake standing in for an API whose shape is not
+documentation-confirmed **must carry an inline `SHAPE UNVERIFIED` note** naming
+what is assumed and what the documentation suggests instead. Never let a
+passing suite be mistaken for API validation. See the header of
+`tests/fake_revit_api.py` for the running list.
+
 The load-bearing unknown: if `RebarStyle.StirrupTie` disallows 180° hooks, the
 mild-steel hook decision (rev 2 §7.3) must be revisited.
