@@ -126,19 +126,23 @@ rules they serve. Full detail in `docs/research/revit-api-strategy.md` and
 
 ---
 
-## Residual open questions — carry into Phase 4 acceptance criteria
+## Residual questions — status as of 2026-09-08
 
-These were deliberately **not** guessed, per `CONTEXT.md`. Each must become
-an explicit acceptance-criteria question on the relevant user story.
+These were deliberately **not** guessed, per `CONTEXT.md`. Four were resolved
+with the owner during Phase 4; two remain open.
 
-| # | Question | Origin |
-|---|---|---|
-| R1 | Should the tool emit a **non-blocking warning** when `Ø_spacer < max(25, Ø_bar, 1.33 × D_agg)`? A21 leaves the vertical direction unchecked | #4 |
-| R2 | **Crack bar embedment depth.** A23 fixes "straight, no hook" but not a length. Candidate consistent with §2: `Support width − Cover` | #5 |
-| R3 | **Unsupported-end anchorage length.** A12 says straight bar of `LD`, but with no support there is no region for it. Either run to `beam end − cover` and warn that `LD` is not achieved, or require a manually supplied support width | #11 |
-| R4 | **Zone-boundary duplicate stirrup.** Can zone 1's last bar and zone 2's first bar coincide at `L/3`? Depends on `includeFirstBar` / `includeLastBar`. Prime candidate for the mock-object verification write-up | #3, #8 |
-| R5 | **Non-perpendicular wall support**: is "width" the thickness or the swept intersection length? | #11 |
-| R6 | **Type 3 inner loop** dimensions, diameter and corner rule — the gap that parks type 3 | #7, #10 |
+| # | Question | Status | Origin |
+|---|---|---|---|
+| R1 | Should the tool warn when `Ø_spacer < max(25, Ø_bar, 1.33 × D_agg)`? A21 leaves the vertical direction unchecked | **RESOLVED** — emit a **non-blocking warning** and place anyway, naming the spacer diameter and the horizontal minimum it falls below. Preserves A21's user control while making an under-spaced layer visible | #4 |
+| R2 | **Crack bar embedment depth.** A23 fixes "straight, no hook" but not a length | **RESOLVED** — `Support width − Cover`, mirroring §2's straight run `a`. No new input | #5 |
+| R3 | **Unsupported-end anchorage length.** A12 says a straight bar of `LD`, but with no support there is no region for it | **RESOLVED** — run to `beam end − cover` and **warn that `LD` was not achieved**, stating both required and achieved lengths | #11 |
+| R4 | **Zone-boundary duplicate stirrup.** Can zone 1's last bar and zone 2's first bar coincide at `L/3`? Depends on `includeFirstBar` / `includeLastBar` | **OPEN** — cannot be closed without a live host. Mitigation: S5 implements an explicit de-duplication guard at each zone boundary, and the mock-object write-up must demonstrate it | #3, #8 |
+| R5 | **Non-perpendicular wall support**: thickness or swept intersection length? | **RESOLVED** — **wall thickness**, measured perpendicular to the wall face. Conservative: understates embedment for oblique beams, giving a shorter `a` and longer bend | #11 |
+| R6 | **Type 3 inner loop** dimensions, diameter and corner rule — the gap that parks type 3 | **OPEN** — permanently for v1, since type 3 is parked (A31) | #7, #10 |
+
+**R4 is the only open question affecting shippable v1 scope.** It is mitigated
+by a guard rather than answered, and that mitigation is what the verification
+write-up must cover.
 
 ## Unverified against a live host
 
