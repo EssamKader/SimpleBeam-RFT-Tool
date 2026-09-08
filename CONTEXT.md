@@ -5,7 +5,12 @@
 All detailing logic (development length & anchorage, stirrup distribution,
 main bar layer offsets, crack/skin reinforcement, bar spacing rules, stirrup
 closure types) is governed by
-[`00.Technical Material/beam_rebar_detailing_spec.docx`](00.Technical%20Material/beam_rebar_detailing_spec.docx).
+[`00.Technical Material/beam_rebar_detailing_spec_v2.docx`](00.Technical%20Material/beam_rebar_detailing_spec_v2.docx).
+
+**Revision 2 is the source of truth.** `beam_rebar_detailing_spec.docx`
+(revision 1) is kept only as the historical baseline — do not implement from
+it. Rev 2 incorporates 40 amendments from the Wayfinder cycle, each traced to
+its deciding ticket in [`docs/spec-amendments.md`](docs/spec-amendments.md).
 
 - Every rule implemented in code must trace back to a numbered section of
   the spec (e.g. "per §2.1", "per §6.2"). Do not invent detailing rules that
@@ -14,20 +19,36 @@ closure types) is governed by
 - If a future change conflicts with the spec, the spec wins unless the user
   explicitly amends it first (and the doc is updated to match).
 
-### Open items in the spec (§9) — must resolve before implementing that part
+### Spec §9 open items — status after the Wayfinder cycle (2026-09-08)
 
-These are **not yet finalized** and must not be implemented from guesswork:
+1. **Bottom bar anchorage bend geometry (`a_btm`, §2.2)** — **CLOSED.**
+   Confirmed correct as written; rationale recorded in rev 2 §2.2.
+2. **Multi-span beam behavior** — **STILL DEFERRED.** Single-span is the hard
+   scope boundary. Do not propose multi-span features unless the user raises
+   them. The tool should warn on, or refuse, a beam in a continuous run
+   rather than silently detailing it as simply supported.
+3. **Stirrup leg dimensioning formulas (§7)** — **CLOSED for the outer
+   perimeter** (rev 2 §7.1). The **inner loop of stirrup type 3** remains
+   undefined, which is why **type 3 is parked** and the stirrup type input is
+   (1, 2, 4) in v1.
 
-1. **Bottom bar anchorage bend geometry (`a_btm`, §2.2)** — the placeholder
-   formula mirrors the top bar's logic by convention but has not been
-   independently confirmed against a sketch.
-2. **Multi-span beam behavior** — this spec covers **single-span only**.
-   Multi-span is explicitly out of scope until a follow-up spec exists.
-3. **Stirrup leg dimensioning formulas (§7)** — stirrup *type* (closure/hook
-   style, 1–4) is defined, but the actual leg-length formulas (perimeter
-   minus cover, per type) are referenced conceptually only, not yet reduced
-   to explicit formulas.
+### Residual questions R1–R6 — must not be guessed
 
-Any ticket touching one of these three areas must resolve the underlying
-question (via a Grill ticket with the user, or an update to the spec doc)
-before it can be marked `ready-for-agent`.
+Rev 2 §11 lists six questions the cycle deliberately left open. Any ticket
+touching one of them must surface it as an explicit acceptance criterion and
+get an answer from the user — it may **not** be resolved by assumption, and
+such a ticket may not be marked `ready-for-agent` until it is.
+
+## Standing rule: no live Revit host
+
+Nothing in this environment can execute Revit API code, so no rebar logic can
+be verified by running it. Every API decision in rev 2 §10 rests on
+documentation and is flagged unverified.
+
+Consequently, **any ticket touching Revit-API-dependent logic requires a
+mock-object simulation write-up** demonstrating the logic is correct before it
+can close in review. That write-up is the actual safety net here, not optional
+polish.
+
+The load-bearing unknown: if `RebarStyle.StirrupTie` disallows 180° hooks, the
+mild-steel hook decision (rev 2 §7.3) must be revisited.
