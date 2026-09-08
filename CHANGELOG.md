@@ -3,10 +3,31 @@
 All notable changes to the RFT Beam Detailing tool.
 
 **Nothing here is deployable yet.** A merge to `master` means the code
-exists; it does **not** mean it is safe to install. Only a tagged release is
-installable, and no tag will be cut until a batch of closed tickets has been
-verified **against a live Revit host** — which has not yet happened for any
-of this work.
+exists; it does **not** mean it is safe to load. Only a tagged release should
+be loaded into a working Revit session, and no tag will be cut until a batch
+of closed tickets has been verified **against a live Revit host** — which has
+not yet happened for any of this work.
+
+## Delivery model
+
+This is a **pyRevit extension** — not a standalone application, and not a
+Revit `.addin` / compiled add-in. There is no installer, no `.sln`, no DLL to
+build, and none should be added.
+
+Deployment means pointing pyRevit at the extension folder:
+
+```
+pyrevit extend <this repo>/RFTBeamDetailing.extension
+```
+
+or registering the path via pyRevit's extension manager, then reloading
+pyRevit. Load from a **tagged commit**, never from whatever `master` happens
+to be at the time.
+
+Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
+`RFT Beam Detailing.tab/` → `Anchorage.panel/` → `*.pushbutton/script.py`,
+plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
+`rft.revit` import cleanly.
 
 ## [Unreleased]
 

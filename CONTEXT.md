@@ -39,6 +39,22 @@ touching one of them must surface it as an explicit acceptance criterion and
 get an answer from the user — it may **not** be resolved by assumption, and
 such a ticket may not be marked `ready-for-agent` until it is.
 
+## Standing rule: pyRevit extension only
+
+This ships as a **pyRevit extension**. It is **not** a standalone application
+and **not** a Revit `.addin` / compiled add-in.
+
+- No `.addin` manifest, no `.csproj`/`.sln`, no compiled DLL, no installer —
+  do not add any, and do not propose a C# port.
+- Python only, against pyRevit's engine.
+- Layout stays pyRevit-conventional:
+  `RFTBeamDetailing.extension/` → `<Name>.tab/` → `<Name>.panel/` →
+  `<Name>.pushbutton/script.py`, with shared code under the extension's
+  `lib/` (pyRevit puts that on `sys.path` automatically, which is why
+  `rft.core` / `rft.revit` import without path juggling).
+- Deployment is `pyrevit extend <path>` or registering the folder in
+  pyRevit's extension manager, then reloading — always from a tagged commit.
+
 ## Standing rule: no live Revit host
 
 Nothing in this environment can execute Revit API code, so no rebar logic can
