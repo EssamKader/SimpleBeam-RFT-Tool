@@ -28,8 +28,8 @@ from rft.revit.geometry import (
     beam_section_axes,
     beam_section_centre_offsets,
     beam_section_dimensions_mm,
-    column_width_along_axis_mm,
-    find_supporting_column,
+    support_width_along_axis_mm,
+    find_supporting_element,
     point_at_cc_offset,
     span_length_mm,
 )
@@ -133,19 +133,19 @@ def main():
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
 
-    col_start = find_supporting_column(doc, start_pt, mm_to_internal)
-    col_end = find_supporting_column(doc, end_pt, mm_to_internal)
+    col_start = find_supporting_element(doc, start_pt, mm_to_internal, exclude_element_id=beam.Id)
+    col_end = find_supporting_element(doc, end_pt, mm_to_internal, exclude_element_id=beam.Id)
     if col_start is None or col_end is None:
         forms.alert(
-            "No supporting column detected at one or both ends. This tool "
+            "No supporting element (column, wall or girder) detected at one or both ends. This tool "
             "assumes a column at both ends (S1 scope carried into S5).",
             title="Unsupported configuration",
         )
         script.exit()
 
     l_mm = span_length_mm(col_start, col_end, internal_to_mm)
-    support_width_start_mm = column_width_along_axis_mm(col_start, axis, internal_to_mm)
-    support_width_end_mm = column_width_along_axis_mm(col_end, axis, internal_to_mm)
+    support_width_start_mm = support_width_along_axis_mm(col_start, axis, internal_to_mm)
+    support_width_end_mm = support_width_along_axis_mm(col_end, axis, internal_to_mm)
     face_a_offset_mm = support_width_start_mm / 2.0
     face_b_offset_mm = support_width_end_mm / 2.0
 

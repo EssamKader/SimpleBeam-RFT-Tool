@@ -65,6 +65,91 @@ def build_bottom_bar_curves(face_start, face_end, axis_direction, bend_direction
     ]
 
 
+def build_main_bar_curves(start_corner, end_corner, bend_direction,
+                           start_bend_internal=None, end_bend_internal=None):
+    """General-purpose curve list for a main bar whose two ends need not
+    match: each end is either BENT (rev 2 section 2.2/2.3, a supported end)
+    or STRAIGHT with no hook (rev 2 section 2.5, A12, an unsupported end)
+    -- issue #15 (S2), which needs this because a beam's two ends can
+    differ, unlike S1's both-ends-bent bottom bar (``build_bottom_bar_
+    curves``, kept unchanged and still used where both ends ARE bent).
+
+    ``start_corner``/``end_corner`` are each end's THEORETICAL CORNER (rev
+    2 section 1, A5): for a bent end this is `a` behind/beyond the support
+    face along the beam axis (same datum as ``build_bottom_bar_curves``);
+    for an unsupported end this is simply the point the straight run
+    terminates at (``beam end - cover``, R3 resolved) -- there is no
+    support face to measure `a` from.
+
+    ``start_bend_internal``/``end_bend_internal`` is that end's bend leg
+    length `b` (internal units) when BENT, or None when that end is
+    unsupported and gets NO hook -- passing None omits the bend segment
+    entirely rather than emitting a zero-length one.
+
+    ``bend_direction`` is shared by both ends here (a single bar's bend
+    direction does not change end to end -- e.g. always upward for a
+    bottom bar, always downward for a top bar); it is unused when neither
+    end is bent.
+    """
+    curves = []
+    if start_bend_internal is not None:
+        bend_end_start = start_corner + bend_direction.Multiply(start_bend_internal)
+        curves.append(Line.CreateBound(bend_end_start, start_corner))
+    curves.append(Line.CreateBound(start_corner, end_corner))
+    if end_bend_internal is not None:
+        bend_end_end = end_corner + bend_direction.Multiply(end_bend_internal)
+        curves.append(Line.CreateBound(end_corner, bend_end_end))
+    return curves
+
+
+def bent_end_corner(face_point, axis_direction, a_internal, toward_span):
+    """The theoretical corner (A5) for a BENT end: `a_internal` further
+    INTO the support from its near face, along the beam axis. ``toward_span``
+    is True for a beam-start support (corner sits AGAINST axis_direction,
+    behind the face, per ``build_bottom_bar_curves``'s ``corner_start``) and
+    False for a beam-end support (corner sits WITH axis_direction, beyond
+    the face, per its ``corner_end``) -- kept as one function so both ends
+    share the same derivation instead of restating the sign by hand at each
+    call site.
+    """
+    sign = -1.0 if toward_span else 1.0
+    return face_point + axis_direction.Multiply(sign * a_internal)
+
+
+def unsupported_end_corner(beam_end_point, axis_direction, cover_internal, toward_span):
+    """The theoretical corner (A5) for an UNSUPPORTED end: the straight run
+    terminates at ``beam end - cover`` (rev 2 section 2.5, R3 resolved) --
+    moved INWARD from the beam's own physical end point by the beam's own
+    end-face cover, along the beam axis. ``toward_span`` matches
+    ``bent_end_corner``'s convention: True at a beam-start end (move WITH
+    axis_direction, into the span), False at a beam-end end (move AGAINST
+    axis_direction).
+    """
+    sign = 1.0 if toward_span else -1.0
+    return beam_end_point + axis_direction.Multiply(sign * cover_internal)
+
+
+def main_bar_end_geometry(is_supported, reference_point, axis_direction, toward_span,
+                           a_or_cover_internal, b_internal=None):
+    """(corner_point, bend_internal_or_None) for ONE end of a main bar
+    (issue #15, S2): a SUPPORTED end is bent -- ``bent_end_corner`` plus
+    its own bend leg `b` (rev 2 section 2.2/2.3) -- an UNSUPPORTED end is
+    straight with no hook (``unsupported_end_corner``, rev 2 section 2.5,
+    A12), returning None for the bend so ``build_main_bar_curves`` omits
+    that segment entirely rather than emitting a zero-length one.
+
+    ``a_or_cover_internal`` is `a` (internal units) when ``is_supported``,
+    or the beam's own end-face cover (internal units) when not -- the two
+    functions it is forwarded to read it differently, matching each one's
+    own formula.
+    """
+    if is_supported:
+        corner = bent_end_corner(reference_point, axis_direction, a_or_cover_internal, toward_span)
+        return corner, b_internal
+    corner = unsupported_end_corner(reference_point, axis_direction, a_or_cover_internal, toward_span)
+    return corner, None
+
+
 def bar_face_points_at_uv(face_start, face_end, u_dir, v_dir,
                           du_internal, dv_internal, u_mm, v_mm, to_internal_units):
     """The two support-face points (internal units) for ONE bar within a
@@ -85,6 +170,21 @@ def bar_face_points_at_uv(face_start, face_end, u_dir, v_dir,
     v_total_internal = dv_internal + to_internal_units(v_mm)
     lateral_offset = u_dir.Multiply(u_total_internal) + v_dir.Multiply(v_total_internal)
     return face_start + lateral_offset, face_end + lateral_offset
+
+
+def bar_point_at_uv(reference_point, u_dir, v_dir, du_internal, dv_internal,
+                     u_mm, v_mm, to_internal_units):
+    """Single-end variant of ``bar_face_points_at_uv`` (issue #15, S2): a
+    beam's two ends can now differ (one bent/supported, one straight/
+    unsupported), so each end's on-axis reference point -- a support face
+    point OR, for an unsupported end, the beam's own end point -- is
+    offset into the bar's local (u, v) position independently, rather than
+    always in a matched face_start/face_end pair.
+    """
+    u_total_internal = du_internal + to_internal_units(u_mm)
+    v_total_internal = dv_internal + to_internal_units(v_mm)
+    lateral_offset = u_dir.Multiply(u_total_internal) + v_dir.Multiply(v_total_internal)
+    return reference_point + lateral_offset
 
 
 def place_anchored_bar(doc, host, bar_type, curves, norm):

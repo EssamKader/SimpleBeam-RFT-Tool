@@ -60,6 +60,13 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   and the R1 non-blocking spacer warning. New `Main Bars.panel` pushbutton
   places the bottom-face bars through S1's anchorage machinery, one per
   layer x corner position, in one transaction. 91 tests.
+- **S2 full end anchorage** (#15): top-bar anchorage bending downward,
+  independent `LD_top` / `LD_btm` multipliers, support detection widened to
+  **any** structural support (column, wall or girder, with wall width taken
+  as thickness per R5), each beam end handled independently, and the
+  unsupported-end straight run with no hook and an explicit warning that
+  `LD` was not achieved (R3). Top bars are now placed, closing the hole S3
+  left. 121 tests.
 
 ### Fixed
 
@@ -72,6 +79,19 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   beam's own local bounding box and instance transform, the technique S1's
   review already adopted for rotated columns. The second half was
   pre-existing in S1 and only became visible once S5 consumed `b`.
+- **The A7 top/bottom clearance was only checked before §2.3's cap, found
+  reviewing #15.** The cap fires per bar and `LD_top` / `LD_btm` are
+  different multipliers, so at a wide support it fires on one bar and not the
+  other. With `Ø_TOP = Ø_BTM = 16` on an 800 mm support the bars end up
+  **79 mm crossed** while the formula-level check reported a comfortable
+  +16 mm and stayed silent. The same check now also runs on the `a` values
+  actually built, per end, and says when the bends have crossed rather than
+  merely closed up. What to *do* on failure is #26, for decision.
+- **The unsupported-end report printed a negative length, found reviewing
+  #15.** R3's warning read "achieves only −25.0 mm", conflating where the bar
+  stops with how much anchorage it achieves. An unsupported end achieves
+  **0 mm** of embedment; the bar's termination short of the beam end is now
+  reported as the separate fact it is.
 - **Horizontal dimensions read off the wrong cover, found reviewing #16.**
   The corner-bar rule and the spacer length are horizontal dimensions across
   the section, but were computed from the top or bottom face cover — so the
@@ -105,6 +125,14 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
   may be calling a non-existent API form; if so it throws on first real run.
   Accepted deliberately, to be corrected on first live Revit test.
+- **#26 — the A7 clearance has no defined failure behaviour.** The tool warns
+  and places anyway, which is a placeholder chosen to avoid inventing a
+  detailing rule, not an answer. Needs a decision.
+- **A beam in a continuous run is now detectable as "supported".** Since
+  support detection includes structural framing (needed for girder supports,
+  §2.4/A9), a beam framing into another beam collinear with it will be
+  detailed as simply supported without complaint. The continuous-run guard is
+  #22 (S9), and until it lands this is the sharpest edge in the tool.
 - **Hook angle is not verified.** The stirrup pushbutton resolves
   `RebarHookType` by name and falls back to the first one in the document. A
   project whose first hook type is a 90° bend therefore gets non-compliant
@@ -129,5 +157,6 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #9 | UI scope decisions |
 | #13 | Steel grade requirement |
 | #14 | S1 tracer bullet |
+| #15 | S2 full end anchorage |
 | #16 | S3 cross-section layout |
 | #18 | S5 stirrups |

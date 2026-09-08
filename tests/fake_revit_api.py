@@ -52,6 +52,14 @@ Currently ``SHAPE UNVERIFIED``:
   load-bearing unverified item named in CONTEXT.md -- this fake does not
   and cannot validate that; it only lets `rft.revit.stirrups` import and
   run under CPython.
+- ``Wall.Width`` (issue #15, S2) -- assumed to be a read-only property
+  returning the wall's total thickness directly in internal units (feet).
+  Not confirmed against a live host; this fake only carries whatever a
+  test assigns.
+- ``BuiltInCategory.OST_Walls`` / ``OST_StructuralFraming`` as valid
+  ``FilteredElementCollector.OfCategory`` arguments for support detection
+  (issue #15, S2) -- assumed to exist and behave like ``OST_StructuralColumns``
+  already did; not newly confirmed here.
 """
 
 import math
@@ -149,17 +157,27 @@ class FakeTransaction(object):
 
 class FakeBuiltInCategory(object):
     OST_StructuralColumns = object()
+    OST_Walls = object()
+    OST_StructuralFraming = object()
 
 
 class FakeFilteredElementCollector(object):
-    """Test bodies monkeypatch ``_ITEMS`` per scenario."""
+    """Test bodies monkeypatch ``_ITEMS`` per scenario.
+
+    ``OfCategory`` filters ``_ITEMS`` by each item's own ``_category``
+    attribute when one is set on the collector; items with no ``_category``
+    attribute (the pre-#15 test bodies) match ANY category, preserving the
+    original permissive behaviour those tests relied on.
+    """
 
     _ITEMS = []
 
     def __init__(self, doc):
         self._doc = doc
+        self._category = None
 
-    def OfCategory(self, _cat):
+    def OfCategory(self, cat):
+        self._category = cat
         return self
 
     def OfClass(self, _cls):
@@ -169,7 +187,12 @@ class FakeFilteredElementCollector(object):
         return self
 
     def __iter__(self):
-        return iter(FakeFilteredElementCollector._ITEMS)
+        if self._category is None:
+            return iter(FakeFilteredElementCollector._ITEMS)
+        return iter(
+            item for item in FakeFilteredElementCollector._ITEMS
+            if getattr(item, "_category", self._category) is self._category
+        )
 
 
 class FakeRebarHostData(object):
@@ -254,6 +277,22 @@ class FakeOptions(object):
     pass
 
 
+class FakeWall(object):
+    """SHAPE UNVERIFIED -- stand-in for `Autodesk.Revit.DB.Wall`, used only
+    so ``isinstance(support, Wall)`` (rft.revit.geometry.
+    support_width_along_axis_mm, issue #15/S2) can be exercised under
+    CPython. Real wall subclassing/`Width` semantics not confirmed -- see
+    tests/fake_revit_api.py header."""
+
+    def __init__(self, width_internal, id_value=None, location=None):
+        self.Width = width_internal
+        self.Id = id_value
+        self.Location = location
+
+    def get_BoundingBox(self, _view):
+        return None
+
+
 class FakeGeometryInstance(object):
     """Stand-in for `Autodesk.Revit.DB.GeometryInstance` -- only used so
     `rft.revit.geometry` (which imports the real type at module scope for
@@ -291,6 +330,7 @@ def install():
     db.FilteredElementCollector = FakeFilteredElementCollector
     db.Options = FakeOptions
     db.GeometryInstance = FakeGeometryInstance
+    db.Wall = FakeWall
     db.Structure = structure
 
     structure.RebarHostData = FakeRebarHostData

@@ -12,15 +12,17 @@ import math
 
 import pytest
 
-from fake_revit_api import FakeGeometryInstance, FakeXYZ
+from fake_revit_api import FakeFilteredElementCollector, FakeGeometryInstance, FakeWall, FakeXYZ
 
 from rft.revit.geometry import (
     beam_section_centre_offsets,
     beam_section_dimensions_mm,
-    column_width_along_axis_mm,
     end_support_face_point,
+    find_supporting_element,
     point_at_cc_offset,
     start_support_face_point,
+    support_reference_point,
+    support_width_along_axis_mm,
 )
 
 
@@ -165,7 +167,7 @@ def test_column_width_along_axis_uses_rotation_aware_local_bbox_when_available()
     # i.e. the beam frames squarely into a column face.
     axis_direction = basis_x
 
-    width_mm = column_width_along_axis_mm(column, axis_direction, from_internal_units=lambda v: v)
+    width_mm = support_width_along_axis_mm(column, axis_direction, from_internal_units=lambda v: v)
 
     assert width_mm == pytest.approx(600.0)
 
@@ -194,7 +196,7 @@ def test_column_width_along_axis_falls_back_to_aabb_without_geometry_instance():
     column = _UnrotatedColumn()
     axis_direction = FakeXYZ(1, 0, 0)
 
-    width_mm = column_width_along_axis_mm(column, axis_direction, from_internal_units=lambda v: v)
+    width_mm = support_width_along_axis_mm(column, axis_direction, from_internal_units=lambda v: v)
 
     assert width_mm == pytest.approx(600.0)
 
@@ -305,3 +307,142 @@ def test_beam_section_centre_offsets_are_rotation_aware_and_catch_a_lateral_shif
     # the point of deriving both from one source.
     b_mm, h_mm = beam_section_dimensions_mm(beam, from_internal_units=lambda v: v)
     assert (b_mm, h_mm) == (pytest.approx(250.0), pytest.approx(600.0))
+
+
+# --- Issue #15 (S2): support detection generalised beyond columns -----------
+
+
+def test_support_width_along_axis_uses_wall_thickness_for_any_incidence_angle():
+    """R5, resolved: a wall's support width is its THICKNESS
+    (``Wall.Width``), regardless of the beam's incidence angle -- not a
+    swept intersection length. A beam meeting the wall at 30 degrees still
+    reports the wall's own thickness, unchanged by ``axis_direction``."""
+    wall = FakeWall(width_internal=250.0 / 304.8)
+    oblique_axis = FakeXYZ(math.cos(math.radians(30)), math.sin(math.radians(30)), 0)
+
+    width_mm = support_width_along_axis_mm(wall, oblique_axis, from_internal_units=lambda v: v * 304.8)
+
+    assert width_mm == pytest.approx(250.0)
+
+
+def test_support_width_along_axis_reuses_local_bbox_path_for_a_girder():
+    """A girder is Structural Framing, not a column, but this ticket
+    requires reusing the SAME rotation-aware ``_local_extent_along``
+    projection (issue #14 review finding #5) rather than a second one --
+    a 400x800 girder rotated 30 degrees, beam framing squarely into one of
+    its faces, must still measure 400 mm along the beam axis."""
+    half_w, half_h = 200.0, 400.0
+    local_bbox = _LocalBBox((-half_w, -half_h), (half_w, half_h))
+
+    angle = math.radians(30)
+    basis_x = FakeXYZ(math.cos(angle), math.sin(angle), 0)
+    basis_y = FakeXYZ(-math.sin(angle), math.cos(angle), 0)
+    transform = _Transform(basis_x, basis_y)
+    geometry_instance = FakeGeometryInstance(local_bbox=local_bbox, transform=transform)
+
+    class _Girder(object):
+        def __init__(self):
+            self.Location = _LocationCurve(FakeXYZ(0, 0, 0), basis_x.Multiply(6000.0))
+            self._geometry_instances = [geometry_instance]
+
+        def get_Geometry(self, _options):
+            return self._geometry_instances
+
+        def get_BoundingBox(self, _view):
+            return None
+
+    girder = _Girder()
+    axis_direction = basis_x  # beam frames squarely into the girder's face
+
+    width_mm = support_width_along_axis_mm(girder, axis_direction, from_internal_units=lambda v: v)
+
+    assert width_mm == pytest.approx(400.0)
+
+
+def test_support_reference_point_uses_location_point_when_available():
+    column = _Column(location_point=FakeXYZ(1.0, 2.0, 3.0))
+    point = support_reference_point(column)
+    assert (point.X, point.Y, point.Z) == (1.0, 2.0, 3.0)
+
+
+def test_support_reference_point_falls_back_to_location_curve_midpoint():
+    """A wall or girder's Location is typically a LocationCurve, not a
+    Point (SHAPE UNVERIFIED design choice, see support_reference_point's
+    docstring) -- the midpoint is used as its reference centre."""
+
+    class _CurveLocatedSupport(object):
+        def __init__(self):
+            self.Id = 999
+            self.Location = _LocationCurve(FakeXYZ(0, 0, 0), FakeXYZ(4000.0, 0, 0))
+
+    point = support_reference_point(_CurveLocatedSupport())
+    assert (point.X, point.Y, point.Z) == (2000.0, 0.0, 0.0)
+
+
+def test_support_reference_point_raises_without_point_or_curve():
+    class _NoLocation(object):
+        Id = 42
+        Location = None
+
+    with pytest.raises(Exception):
+        support_reference_point(_NoLocation())
+
+
+class _TaggedElement(object):
+    def __init__(self, id_value, category, bbox_center, half_extent=300.0):
+        self.Id = id_value
+        self._category = category
+        cx, cy = bbox_center
+
+        class _BBox(object):
+            Min = FakeXYZ(cx - half_extent, cy - half_extent, 0)
+            Max = FakeXYZ(cx + half_extent, cy + half_extent, 0)
+
+        self._bbox = _BBox()
+
+    def get_BoundingBox(self, _view):
+        return self._bbox
+
+
+def test_find_supporting_element_returns_nearest_across_all_three_categories(monkeypatch):
+    from Autodesk.Revit.DB import BuiltInCategory
+
+    near_column = _TaggedElement(1, BuiltInCategory.OST_StructuralColumns, (0, 0))
+    far_wall = _TaggedElement(2, BuiltInCategory.OST_Walls, (5000, 0))
+    near_girder = _TaggedElement(3, BuiltInCategory.OST_StructuralFraming, (10, 0))
+    monkeypatch.setattr(
+        FakeFilteredElementCollector, "_ITEMS", [near_column, far_wall, near_girder]
+    )
+
+    found = find_supporting_element(doc=None, point=FakeXYZ(0, 0, 0), to_internal_units=lambda v: v)
+
+    assert found is near_column  # nearest bbox centre wins, regardless of category
+
+
+def test_find_supporting_element_excludes_the_beam_being_detailed(monkeypatch):
+    """A girder search uses OST_StructuralFraming, the SAME category the
+    beam itself belongs to -- without exclusion the beam could find
+    itself."""
+    from Autodesk.Revit.DB import BuiltInCategory
+
+    the_beam_itself = _TaggedElement(7, BuiltInCategory.OST_StructuralFraming, (0, 0))
+    real_girder = _TaggedElement(8, BuiltInCategory.OST_StructuralFraming, (0, 0))
+    monkeypatch.setattr(
+        FakeFilteredElementCollector, "_ITEMS", [the_beam_itself, real_girder]
+    )
+
+    found = find_supporting_element(
+        doc=None, point=FakeXYZ(0, 0, 0), to_internal_units=lambda v: v, exclude_element_id=7
+    )
+
+    assert found is real_girder
+
+
+def test_find_supporting_element_returns_none_for_a_free_end(monkeypatch):
+    """No support in range -- the caller must take the unsupported/free-end
+    path (rev 2 section 2.5, A12/A14)."""
+    monkeypatch.setattr(FakeFilteredElementCollector, "_ITEMS", [])
+
+    found = find_supporting_element(doc=None, point=FakeXYZ(0, 0, 0), to_internal_units=lambda v: v)
+
+    assert found is None

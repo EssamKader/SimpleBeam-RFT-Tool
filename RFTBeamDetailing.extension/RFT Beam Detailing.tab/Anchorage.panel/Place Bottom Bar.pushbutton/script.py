@@ -23,9 +23,9 @@ from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
     beam_section_dimensions_mm,
-    column_width_along_axis_mm,
+    support_width_along_axis_mm,
     end_support_face_point,
-    find_supporting_column,
+    find_supporting_element,
     span_length_mm,
     start_support_face_point,
 )
@@ -113,11 +113,11 @@ def main():
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
 
-    col_start = find_supporting_column(doc, start_pt, mm_to_internal)
-    col_end = find_supporting_column(doc, end_pt, mm_to_internal)
+    col_start = find_supporting_element(doc, start_pt, mm_to_internal, exclude_element_id=beam.Id)
+    col_end = find_supporting_element(doc, end_pt, mm_to_internal, exclude_element_id=beam.Id)
     if col_start is None or col_end is None:
         forms.alert(
-            "No supporting column detected at one or both ends. S1 assumes "
+            "No supporting element (column, wall or girder) detected at one or both ends. S1 assumes "
             "a column at both ends -- other support types and the "
             "no-support path are S2 (issue #15).",
             title="Unsupported configuration",
@@ -125,8 +125,8 @@ def main():
         script.exit()
 
     l_mm = span_length_mm(col_start, col_end, internal_to_mm)
-    support_width_start_mm = column_width_along_axis_mm(col_start, axis, internal_to_mm)
-    support_width_end_mm = column_width_along_axis_mm(col_end, axis, internal_to_mm)
+    support_width_start_mm = support_width_along_axis_mm(col_start, axis, internal_to_mm)
+    support_width_end_mm = support_width_along_axis_mm(col_end, axis, internal_to_mm)
 
     try:
         cover_start_mm = read_support_cover_mm(col_start, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm)

@@ -18,12 +18,23 @@ from Autodesk.Revit.DB import (
     FilteredElementCollector,
     GeometryInstance,
     Options,
+    Wall,
     XYZ,
 )
 
 from .host import HostValidationError
 
 DEFAULT_SUPPORT_SEARCH_RADIUS_MM = 300.0
+
+# rev 2 section 2.4, A9: any structural support -- column, wall or girder.
+# A girder is itself Structural Framing, the SAME category the beam being
+# detailed belongs to -- callers must pass `exclude_element_id` to avoid a
+# beam finding itself.
+SUPPORT_CATEGORIES = (
+    BuiltInCategory.OST_StructuralColumns,
+    BuiltInCategory.OST_Walls,
+    BuiltInCategory.OST_StructuralFraming,
+)
 
 
 def beam_endpoints(beam):
@@ -152,32 +163,44 @@ def beam_section_centre_offsets(beam, station_point):
     return du, dv
 
 
-def find_supporting_column(doc, point, to_internal_units,
-                            search_radius_mm=DEFAULT_SUPPORT_SEARCH_RADIUS_MM):
-    """Nearest structural column whose (plan) bounding box, expanded by
-    ``search_radius_mm``, contains ``point``. Returns None if none found --
-    callers must treat that as "no support detected" (S1 assumes one always
-    exists; S2 handles the absence).
+def find_supporting_element(doc, point, to_internal_units, exclude_element_id=None,
+                             search_radius_mm=DEFAULT_SUPPORT_SEARCH_RADIUS_MM):
+    """Nearest structural support -- column, wall or girder -- whose (plan)
+    bounding box, expanded by ``search_radius_mm``, contains ``point`` (rev
+    2 section 2.4, A9). Returns None if none found -- callers must treat
+    that as the unsupported/free-end path (rev 2 section 2.5, S2).
+
+    ``exclude_element_id`` lets a caller exclude the beam being detailed
+    itself: a girder search uses ``OST_StructuralFraming``, the SAME
+    category the beam itself belongs to, so without this the beam could
+    find itself as its own "support".
+
+    Generalises S1's column-only ``find_supporting_column`` (renamed).
+    Searched across all three support categories, nearest bounding-box
+    centre wins across categories, same distance metric as before.
     """
     radius = to_internal_units(search_radius_mm)
-    collector = (
-        FilteredElementCollector(doc)
-        .OfCategory(BuiltInCategory.OST_StructuralColumns)
-        .WhereElementIsNotElementType()
-    )
     best, best_dist = None, None
-    for column in collector:
-        bbox = column.get_BoundingBox(None)
-        if bbox is None:
-            continue
-        if not (bbox.Min.X - radius <= point.X <= bbox.Max.X + radius and
-                bbox.Min.Y - radius <= point.Y <= bbox.Max.Y + radius):
-            continue
-        cx = (bbox.Min.X + bbox.Max.X) / 2.0
-        cy = (bbox.Min.Y + bbox.Max.Y) / 2.0
-        dist = ((cx - point.X) ** 2 + (cy - point.Y) ** 2) ** 0.5
-        if best_dist is None or dist < best_dist:
-            best, best_dist = column, dist
+    for category in SUPPORT_CATEGORIES:
+        collector = (
+            FilteredElementCollector(doc)
+            .OfCategory(category)
+            .WhereElementIsNotElementType()
+        )
+        for element in collector:
+            if exclude_element_id is not None and element.Id == exclude_element_id:
+                continue
+            bbox = element.get_BoundingBox(None)
+            if bbox is None:
+                continue
+            if not (bbox.Min.X - radius <= point.X <= bbox.Max.X + radius and
+                    bbox.Min.Y - radius <= point.Y <= bbox.Max.Y + radius):
+                continue
+            cx = (bbox.Min.X + bbox.Max.X) / 2.0
+            cy = (bbox.Min.Y + bbox.Max.Y) / 2.0
+            dist = ((cx - point.X) ** 2 + (cy - point.Y) ** 2) ** 0.5
+            if best_dist is None or dist < best_dist:
+                best, best_dist = element, dist
     return best
 
 
@@ -214,18 +237,21 @@ def _rotation_aware_local_bbox(element):
     found, in which case the caller falls back to the (rotation-unsafe)
     AABB.
 
-    Used for supports (``column_width_along_axis_mm``) and, since issue
-    #18's review, for the BEAM itself: `b` and the section centroid have
+    Used for supports (``support_width_along_axis_mm``, columns and
+    girders -- walls take a separate ``Wall.Width`` path, no bounding box
+    needed) and, since issue #18's review, for the BEAM itself: `b` and
+    the section centroid have
     exactly the same rotation problem, and a 250x6000 beam at 45 deg
     otherwise measures b = 6250 mm (= b + L).
 
     UNVERIFIED AGAINST A LIVE HOST: whether `FamilyInstance.get_Geometry()`
     reliably yields a `GeometryInstance` wrapping symbol-space geometry for
-    a structural column or beam (vs. already-transformed `Solid`s, which
-    some families/`Options` combinations return directly) has not been
-    confirmed without a real model. Scope limit per issue #14 review: this
-    is fixed only well enough for columns and single rectangular beams;
-    general support-type detection is issue #15 (S2).
+    a structural column, girder or beam (vs. already-transformed `Solid`s,
+    which some families/`Options` combinations return directly) has not
+    been confirmed without a real model. Issue #15 (S2) reuses this
+    unchanged for girders (same category shape as a column/beam, a
+    `FamilyInstance`); it does NOT apply to walls, which take the separate
+    `Wall.Width` path in `support_width_along_axis_mm` and never call this.
     """
     options = Options()
     for geom_obj in element.get_Geometry(options):
@@ -236,29 +262,47 @@ def _rotation_aware_local_bbox(element):
     return None, None
 
 
-def column_width_along_axis_mm(column, axis_direction, from_internal_units):
-    """Support width (rev 2 section 2.4): how far into the column, along
-    the beam axis, a straight bar can travel.
+def support_width_along_axis_mm(support, axis_direction, from_internal_units):
+    """Support width (rev 2 section 2.4, A9): how far into the support,
+    along the beam axis, a straight bar can travel. Generalises S1's
+    column-only ``column_width_along_axis_mm`` (renamed) to any structural
+    support -- column, wall or girder.
 
-    Preferentially measured against the column's own local bounding box
-    (rotation-aware, issue #14 review finding #5) by expressing
-    `axis_direction` in the column's local frame via its instance
+    WALL: support width = wall thickness (``Wall.Width``), regardless of
+    the beam's incidence angle (R5, resolved). Deliberately conservative:
+    understates embedment for an oblique beam, giving a shorter `a` and a
+    longer bend `b` -- do not "improve" this into a swept-intersection
+    length.
+
+    SHAPE UNVERIFIED: ``Wall.Width`` -- assumed to be a read-only property
+    returning the wall's total thickness in internal units (feet). Not
+    confirmed against a live host; see tests/fake_revit_api.py header.
+
+    COLUMN OR GIRDER: measured against the support's own local bounding
+    box (rotation-aware, issue #14 review finding #5) by expressing
+    `axis_direction` in the support's local frame via its instance
     transform, then projecting the LOCAL (un-rotated) bbox corners --
-    this is exact for a rotated rectangular column since a rectangle's
+    this is exact for a rotated rectangular support since a rectangle's
     projection onto any direction is symmetric about its centre regardless
-    of in-plan rotation. Falls back to the world-axis-aligned bounding box
-    only if no `GeometryInstance` can be found, which is only correct when
-    the column happens to be unrotated relative to the world axes.
+    of in-plan rotation. This is the SAME projection
+    (``_local_extent_along``) used for columns, reused unchanged for a
+    girder -- not a second projection. Falls back to the world-axis-aligned
+    bounding box only if no `GeometryInstance` can be found, which is only
+    correct when the support happens to be unrotated relative to the world
+    axes.
     """
-    local_bbox, transform = _rotation_aware_local_bbox(column)
+    if isinstance(support, Wall):
+        return from_internal_units(support.Width)
+
+    local_bbox, transform = _rotation_aware_local_bbox(support)
     if local_bbox is not None and transform is not None:
         return from_internal_units(_local_extent_along(local_bbox, transform, axis_direction))
 
-    bbox = column.get_BoundingBox(None)
+    bbox = support.get_BoundingBox(None)
     if bbox is None:
         raise HostValidationError(
-            "Column {} has no bounding box geometry.".format(column.Id),
-            element_id=column.Id,
+            "Support {} has no bounding box geometry.".format(support.Id),
+            element_id=support.Id,
         )
     axis_xy = XYZ(axis_direction.X, axis_direction.Y, 0).Normalize()
     corners = _horizontal_bbox_corners(bbox)
@@ -266,63 +310,97 @@ def column_width_along_axis_mm(column, axis_direction, from_internal_units):
     return from_internal_units(max(proj) - min(proj))
 
 
-def start_support_face_point(column, beam_start_point, axis_direction, support_width_internal):
+def support_reference_point(support):
+    """The support's own reference point, used as the centre datum for
+    face-point / c/c-span derivations (rev 2 section 2.4, A9).
+
+    A column exposes ``Location.Point`` directly. A wall or girder's
+    ``Location`` is typically a ``LocationCurve`` instead -- this falls
+    back to that curve's midpoint, since callers only ever project this
+    point onto the beam axis via ``DotProduct`` (the same "centre + half
+    width" symmetric-footprint reasoning `start_support_face_point` already
+    relies on for columns applies equally to a girder's or wall's own
+    length datum).
+
+    SHAPE UNVERIFIED / DESIGN CHOICE: whether a girder or wall instance
+    exposes ``Location.Point`` or ``Location.Curve`` was not confirmed
+    against a live host, and "curve midpoint as reference centre" is this
+    ticket's own engineering choice, not a rev 2 rule -- flagged in this
+    ticket's report.
+    """
+    location = support.Location
+    point = getattr(location, "Point", None)
+    if point is not None:
+        return point
+    curve = getattr(location, "Curve", None)
+    if curve is not None:
+        p0, p1 = curve.GetEndPoint(0), curve.GetEndPoint(1)
+        return XYZ((p0.X + p1.X) / 2.0, (p0.Y + p1.Y) / 2.0, (p0.Z + p1.Z) / 2.0)
+    raise HostValidationError(
+        "Support {} has neither Location.Point nor Location.Curve; cannot "
+        "derive its reference point (rev 2 section 2.4).".format(support.Id),
+        element_id=support.Id,
+    )
+
+
+def start_support_face_point(support, beam_start_point, axis_direction, support_width_internal):
     """The point (internal units) where the beam-start support's near face
     -- the face the bar's straight leg passes through -- crosses the beam
     axis line.
 
-    Derived from the column's own location point and its (rotation-aware)
-    support width, not assumed to be the beam's `LocationCurve` endpoint
-    (issue #14 review finding #2): `span_length_mm` derives `L` from the
-    two columns' location points (centre-to-centre), which implies the
-    beam curve typically runs column-centre to column-centre rather than
-    face to face -- so `beam_start_point` itself may sit past the column's
-    centre, not at its near face. A rectangular column's footprint is
-    centrally symmetric, so its projection onto `axis_direction` is
-    symmetric about the projected centre regardless of rotation, making
-    "centre + half width" a valid face datum even under finding #5's fix.
+    Derived from the support's own reference point (``support_reference_
+    point``) and its (rotation-aware) support width, not assumed to be the
+    beam's `LocationCurve` endpoint (issue #14 review finding #2):
+    `span_length_mm` derives `L` from the two supports' reference points
+    (centre-to-centre), which implies the beam curve typically runs
+    support-centre to support-centre rather than face to face -- so
+    `beam_start_point` itself may sit past the support's centre, not at its
+    near face. A rectangular support's footprint is centrally symmetric,
+    so its projection onto `axis_direction` is symmetric about the
+    projected centre regardless of rotation, making "centre + half width"
+    a valid face datum even under finding #5's fix.
     """
-    center = column.Location.Point
+    center = support_reference_point(support)
     t_center = axis_direction.DotProduct(center - beam_start_point)
     t_face = t_center + support_width_internal / 2.0
     return beam_start_point + axis_direction.Multiply(t_face)
 
 
-def end_support_face_point(column, beam_start_point, axis_direction, support_width_internal):
+def end_support_face_point(support, beam_start_point, axis_direction, support_width_internal):
     """The point (internal units) where the beam-end support's near face
     crosses the beam axis line. Same derivation as
     `start_support_face_point`, mirrored: the near face is on the
-    `-axis_direction` side of the column's centre (see that function's
-    docstring for the full rationale).
+    `-axis_direction` side of the support's reference point (see that
+    function's docstring for the full rationale).
     """
-    center = column.Location.Point
+    center = support_reference_point(support)
     t_center = axis_direction.DotProduct(center - beam_start_point)
     t_face = t_center - support_width_internal / 2.0
     return beam_start_point + axis_direction.Multiply(t_face)
 
 
-def point_at_cc_offset(beam_start_point, axis_direction, reference_column, offset_mm, to_internal_units):
+def point_at_cc_offset(beam_start_point, axis_direction, reference_support, offset_mm, to_internal_units):
     """A point on the beam axis line at ``offset_mm`` (mm) from
-    ``reference_column``'s own centre, along ``axis_direction``.
+    ``reference_support``'s own reference point, along ``axis_direction``.
 
     This is the same centre-referenced c/c datum ``span_length_mm`` and
-    ``rft.core.stirrups.stirrup_zones_mm`` use (0 == the reference column's
-    own centre, rev 2 section 3.1) -- so a zone's ``start``/``end`` value
-    (mm) can be turned directly into a 3D point without re-deriving the
-    datum. Same centre-projection technique as
+    ``rft.core.stirrups.stirrup_zones_mm`` use (0 == the reference
+    support's own reference point, rev 2 section 3.1) -- so a zone's
+    ``start``/``end`` value (mm) can be turned directly into a 3D point
+    without re-deriving the datum. Same centre-projection technique as
     ``start_support_face_point``/``end_support_face_point``.
     """
-    center = reference_column.Location.Point
+    center = support_reference_point(reference_support)
     t_center = axis_direction.DotProduct(center - beam_start_point)
     t_target = t_center + to_internal_units(offset_mm)
     return beam_start_point + axis_direction.Multiply(t_target)
 
 
-def span_length_mm(column_a, column_b, from_internal_units):
+def span_length_mm(support_a, support_b, from_internal_units):
     """L = centreline-to-centreline distance between supports (rev 2
-    section 1, A6), taken between the two columns' location points.
+    section 1, A6), taken between the two supports' reference points.
     """
-    pa = column_a.Location.Point
-    pb = column_b.Location.Point
+    pa = support_reference_point(support_a)
+    pb = support_reference_point(support_b)
     dist = ((pa.X - pb.X) ** 2 + (pa.Y - pb.Y) ** 2) ** 0.5
     return from_internal_units(dist)

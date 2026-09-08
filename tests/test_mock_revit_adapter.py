@@ -18,9 +18,14 @@ from fake_revit_api import FakeElementId, FakeRebarHookType, FakeTransaction, Fa
 from rft.revit.host import HostValidationError, read_face_cover_mm, validate_rebar_host
 from rft.revit.placement import (
     bar_face_points_at_uv,
+    bar_point_at_uv,
     bend_plane_normal,
+    bent_end_corner,
     build_bottom_bar_curves,
+    build_main_bar_curves,
+    main_bar_end_geometry,
     run_in_transaction,
+    unsupported_end_corner,
 )
 from rft.revit.stirrups import apply_maximum_spacing_layout, build_stirrup_curves, place_stirrup
 from rft.core.stirrups import (
@@ -410,3 +415,147 @@ def test_r4_mitigation_three_zone_placement_claims_each_boundary_exactly_once():
     # (one rebar set per zone, §3.2, A18).
     for name in accessors:
         assert len(accessors[name].calls) == 1
+
+
+# --- Issue #15 (S2): full end anchorage, mixed bent/straight ends ----------
+
+
+def test_bar_point_at_uv_applies_centroid_correction_and_bar_offset_single_point():
+    """Single-end variant of ``bar_face_points_at_uv`` (issue #15): same
+    both-offsets-must-combine check, but for one reference point rather
+    than a matched start/end pair, since a beam's two ends can now differ."""
+    reference_point = FakeXYZ(0, 0, 0)
+    u_dir = FakeXYZ(0, 1, 0)
+    v_dir = FakeXYZ(0, 0, 1)
+
+    point = bar_point_at_uv(
+        reference_point, u_dir, v_dir,
+        du_internal=10.0, dv_internal=-300.0,
+        u_mm=107.0, v_mm=-257.0,
+        to_internal_units=_to_internal,
+    )
+
+    assert point.Y == pytest.approx(10.0 + _to_internal(107.0))
+    assert point.Z == pytest.approx(-300.0 + _to_internal(-257.0))
+
+
+def test_bent_end_corner_matches_build_bottom_bar_curves_datum():
+    """``bent_end_corner`` must reproduce the SAME corner points
+    ``build_bottom_bar_curves`` already computes inline, for both ends'
+    sign conventions -- this is a refactor, not a behaviour change."""
+    face_start = FakeXYZ(0, 0, 0)
+    face_end = FakeXYZ(6000, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+
+    corner_start = bent_end_corner(face_start, axis_direction, a_internal=559, toward_span=True)
+    corner_end = bent_end_corner(face_end, axis_direction, a_internal=275, toward_span=False)
+
+    assert corner_start == FakeXYZ(-559, 0, 0)
+    assert corner_end == FakeXYZ(6275, 0, 0)
+
+
+def test_unsupported_end_corner_moves_inward_from_the_beam_end_by_cover():
+    """R3 resolved: the straight run terminates at `beam end - cover` --
+    moved INWARD (toward the span) from the beam's own physical end point
+    by the cover, for both ends' sign conventions."""
+    beam_start = FakeXYZ(0, 0, 0)
+    beam_end = FakeXYZ(6000, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+    cover_internal = 25.0
+
+    start_corner = unsupported_end_corner(beam_start, axis_direction, cover_internal, toward_span=True)
+    end_corner = unsupported_end_corner(beam_end, axis_direction, cover_internal, toward_span=False)
+
+    assert start_corner == FakeXYZ(25.0, 0, 0)  # moved +axis, INTO the span
+    assert end_corner == FakeXYZ(5975.0, 0, 0)  # moved -axis, INTO the span
+
+
+def test_main_bar_end_geometry_supported_end_returns_bend_leg():
+    face_start = FakeXYZ(0, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+
+    corner, bend = main_bar_end_geometry(
+        is_supported=True, reference_point=face_start, axis_direction=axis_direction,
+        toward_span=True, a_or_cover_internal=559, b_internal=200,
+    )
+
+    assert corner == FakeXYZ(-559, 0, 0)
+    assert bend == 200
+
+
+def test_main_bar_end_geometry_unsupported_end_returns_no_bend():
+    """The §2.3 mandatory-hook rule must NOT fire at an unsupported end
+    (rev 2 section 2.5, A12) -- ``bend`` must come back None, not 0 or any
+    other value ``build_main_bar_curves`` could mistake for a real leg."""
+    beam_end = FakeXYZ(6000, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+
+    corner, bend = main_bar_end_geometry(
+        is_supported=False, reference_point=beam_end, axis_direction=axis_direction,
+        toward_span=False, a_or_cover_internal=25.0,
+    )
+
+    assert corner == FakeXYZ(5975.0, 0, 0)
+    assert bend is None
+
+
+def test_build_main_bar_curves_both_ends_bent_matches_three_segment_baseline():
+    """Sanity check against S1's already-verified 3-segment baseline
+    (``build_bottom_bar_curves``): with both ends bent, ``build_main_bar_
+    curves`` must produce the identical geometry, not merely a
+    same-length curve list."""
+    face_start = FakeXYZ(0, 0, 0)
+    face_end = FakeXYZ(6000, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+    bend_direction = FakeXYZ.BasisZ
+
+    baseline = build_bottom_bar_curves(
+        face_start, face_end, axis_direction, bend_direction,
+        a_start_internal=559, b_start_internal=200,
+        a_end_internal=275, b_end_internal=605,
+    )
+
+    corner_start = bent_end_corner(face_start, axis_direction, 559, toward_span=True)
+    corner_end = bent_end_corner(face_end, axis_direction, 275, toward_span=False)
+    generalised = build_main_bar_curves(
+        corner_start, corner_end, bend_direction,
+        start_bend_internal=200, end_bend_internal=605,
+    )
+
+    assert len(generalised) == 3
+    for base_curve, gen_curve in zip(baseline, generalised):
+        assert base_curve[1] == gen_curve[1]
+        assert base_curve[2] == gen_curve[2]
+
+
+def test_build_main_bar_curves_one_end_unsupported_omits_that_bend_segment():
+    """A bar bent at the start, straight (no hook) at the end: exactly TWO
+    segments, not three -- issue #15's core geometric requirement, since
+    the §2.3 mandatory-hook rule must not fire at the unsupported end."""
+    corner_start = FakeXYZ(-559, 0, 0)
+    corner_end = FakeXYZ(5975, 0, 0)  # beam end - cover, no support
+    bend_direction = FakeXYZ.BasisZ
+
+    curves = build_main_bar_curves(
+        corner_start, corner_end, bend_direction,
+        start_bend_internal=200, end_bend_internal=None,
+    )
+
+    assert len(curves) == 2
+    bend_a_line, straight_line = curves
+    assert bend_a_line[2] == corner_start
+    assert bend_a_line[1] == FakeXYZ(-559, 0, 200)
+    assert straight_line[1] == corner_start
+    assert straight_line[2] == corner_end
+
+
+def test_build_main_bar_curves_both_ends_unsupported_is_a_single_straight_segment():
+    corner_start = FakeXYZ(25, 0, 0)
+    corner_end = FakeXYZ(5975, 0, 0)
+    bend_direction = FakeXYZ.BasisZ
+
+    curves = build_main_bar_curves(corner_start, corner_end, bend_direction)
+
+    assert len(curves) == 1
+    assert curves[0][1] == corner_start
+    assert curves[0][2] == corner_end
