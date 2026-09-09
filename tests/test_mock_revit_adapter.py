@@ -506,6 +506,27 @@ def test_main_bar_end_geometry_unsupported_end_returns_no_bend():
     assert bend is None
 
 
+def test_main_bar_end_geometry_supported_end_with_no_bend_is_a_straight_embedment():
+    """Issue #19 (S6): a crack/skin bar's SUPPORTED end embeds straight
+    into the support with NO hook (A23) -- `b_internal` is explicitly
+    `None` even though `is_supported=True`. `main_bar_end_geometry` must
+    still return the full `bent_end_corner` embedment point (the corner IS
+    the embedment depth into the support) and `bend=None`, exactly as the
+    unsupported-end case already does -- confirming reuse of this
+    function for crack bars needs no new branch, only a caller that never
+    passes a bend leg."""
+    face_start = FakeXYZ(0, 0, 0)
+    axis_direction = FakeXYZ(1, 0, 0)
+
+    corner, bend = main_bar_end_geometry(
+        is_supported=True, reference_point=face_start, axis_direction=axis_direction,
+        toward_span=True, a_or_cover_internal=360, b_internal=None,
+    )
+
+    assert corner == FakeXYZ(-360, 0, 0)
+    assert bend is None
+
+
 def test_build_main_bar_curves_both_ends_bent_matches_three_segment_baseline():
     """Sanity check against S1's already-verified 3-segment baseline
     (``build_bottom_bar_curves``): with both ends bent, ``build_main_bar_

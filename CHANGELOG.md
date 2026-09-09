@@ -127,6 +127,21 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Crack / skin reinforcement (S6, #19): `lib/rft/core/crack_bars.py`
+  plus a `Place Crack Bars` pushbutton.** Fires only when `h > 700`
+  (rev 2 section 5, strict). `H_avail = h - offset_top - offset_btm`
+  measured to the **innermost** main bar layer (A26), so it is the true
+  unreinforced web height and yields fewer layers than a naive reading.
+  `n_gaps = ceil(H_avail / s_max)` with an epsilon-tolerant ceiling, so an
+  exact multiple cannot invent an extra gap; `H_avail <= s_max` collapses
+  to zero crack layers, a legitimate outcome rather than an error. One bar
+  per side face per layer, inset `cover_side + O_stirrup + 1/2*O_crack`
+  (A24), diameter from a `ROLE_CRACK` bar-type selection (A42, superseding
+  A22's free-text input), running the full span and embedding straight
+  into the support with no hook (A23) by `support width - support cover`
+  (R2, and no section 2.3 cap). Exempt from section 6.2 spacing validation
+  (A25), stated explicitly in code so #17 cannot sweep crack bars into it.
+  `s_max` defaults to A36's 200 mm.
 - **Per-role bar types (A42, #27): one `RebarBarType` selection per bar
   role, and the diameter comes from the selected type.** A Revit
   `RebarBarType` *is* a diameter, so A35's two selections could not express
@@ -173,6 +188,13 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
   may be calling a non-existent API form; if so it throws on first real run.
   Accepted deliberately, to be corrected on first live Revit test.
+- **`Place Crack Bars` re-asks for the main bar layer counts.** A26's
+  `H_avail` is measured to the innermost main bar layer, so the crack-bar
+  run needs `layers_top` / `layers_btm` -- and nothing reads them back from
+  the bars already placed. Enter different counts than `Place Main Bars`
+  used and `H_avail` will silently not match the as-built beam. Per-project
+  persistence of these inputs is #21 (S8); this is the sharpest instance of
+  that gap, because unlike a wrong bar type it produces no visible clash.
 - **Bar-type selections are not shared between pushbuttons.** Each run picks
   its own, so `Place Main Bars` can position main bars against one stirrup
   type while `Place Stirrups` places another — nothing in a single run can
@@ -209,4 +231,5 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #18 | S5 stirrups |
 | #20 | S7 steel grades and bar type resolution |
 | #27 | A42 per-role bar type selection |
+| #19 | S6 crack / skin reinforcement |
 | #22 | S9 out-of-scope configuration guards |
