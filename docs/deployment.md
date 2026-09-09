@@ -11,18 +11,40 @@ in this project's development environment can execute Revit API code
 host validation, cover read-back, hook family/angle read-back) has **never
 executed against a real Revit session**.
 
-Do not point pyRevit at `master`. When a tag exists, deploy it:
+Do not point pyRevit at `master`, and do not point it at the working tree:
+a registered search path loads whatever is on disk *now*, so an edit to
+`master` silently changes what is loaded inside a running Revit session.
+Check the tag out into its own detached worktree and register that instead
+-- the loaded copy then cannot drift, while `master` stays editable.
 
 ```
-git checkout <tag>
-pyrevit extend "<repo>/RFTBeamDetailing.extension"
+git worktree add "<somewhere>/rft-<tag>" <tag>
+pyrevit extensions paths add "<somewhere>/rft-<tag>"
 ```
 
-or register the folder path via pyRevit's extension manager (Settings ->
-Custom Extension Directories) and reload pyRevit. This matches
-`RFTBeamDetailing.extension`'s own `extension.json`/`bundle.yaml` layout --
-`pyrevit extend` does not require anything beyond the folder existing at
-that path.
+Then reload pyRevit (its ribbon "Reload" button, or restart Revit). The
+equivalent GUI route is pyRevit Settings -> Custom Extension Directories.
+To back the install out: `pyrevit extensions paths forget "<path>"`, then
+`git worktree remove "<path>"`.
+
+**The registered path is the folder that *contains* `RFTBeamDetailing.extension`,
+not the `.extension` folder itself.** pyRevit scans each search path for
+child directories whose names end in `.extension`; naming the bundle
+directly registers a path with no extensions in it, and the tab never
+appears.
+
+*(An earlier draft of this document gave
+`pyrevit extend "<repo>/RFTBeamDetailing.extension"` after a
+`git checkout <tag>`. That command does not do this job -- verified against
+the installed CLI, `pyrevit v6.1.0.26047`: `pyrevit extend` **clones a
+third-party extension from a git repo URL** into pyRevit's own extensions
+directory (`pyrevit extend (ui | lib) <extension_name> <repo_url>`), so
+handing it a local folder path is not a local install at all. `pyrevit
+extensions paths add` is the command that registers an existing folder.
+The `git checkout <tag>` half was also poor advice on its own: it detaches
+the repo's only working tree, so the project's own source and the loaded
+copy become the same detached checkout. Corrected on review before the
+first install.)*
 
 ## What must exist in the model before the buttons work
 
