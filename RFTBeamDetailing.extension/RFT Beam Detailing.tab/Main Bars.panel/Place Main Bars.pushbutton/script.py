@@ -83,6 +83,7 @@ from rft.core.spacing import (
 from rft.revit.bar_types import (
     bar_type_diameter_mm,
     bar_type_options,
+    element_name,
 )
 from rft.revit.geometry import (
     beam_axis_direction,
@@ -308,9 +309,9 @@ def main():
     dia_btm_mm = bar_type_diameter_mm(btm_bar_type, internal_to_mm)
     dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
 
-    top_bar_type_name = getattr(top_bar_type, "Name", "")
-    btm_bar_type_name = getattr(btm_bar_type, "Name", "")
-    stirrup_bar_type_name = getattr(stirrup_bar_type, "Name", "")
+    top_bar_type_name = element_name(top_bar_type)
+    btm_bar_type_name = element_name(btm_bar_type)
+    stirrup_bar_type_name = element_name(stirrup_bar_type)
 
     # --- A42 (ticket #27) mechanical grade-conflict guard, run IN-RUN:
     # this pushbutton now holds the stirrup selection and both high-tensile
@@ -410,10 +411,15 @@ def main():
     cover_top_mm = beam_covers.top_mm
     cover_btm_mm = beam_covers.bottom_mm
     cover_side_mm = beam_covers.side_mm
-    # Only one of these is ever populated, at whichever end is unsupported;
-    # the anchorage/report code below reads `cover_end_mm` unconditionally
-    # for whichever end needs it, so pick whichever is not None (both may be
-    # None if both ends are supported, in which case cover_end_mm is unused).
+    # Only one of these is ever populated, at whichever end is unsupported,
+    # so pick whichever is not None. BOTH are None when both ends are
+    # supported -- the normal single-span case -- because a supported end has
+    # no exposed end face to carry a cover. Every consumer below must
+    # therefore treat None as "not applicable" rather than as a number: the
+    # anchorage call at the unsupported-end branch is already guarded by that
+    # branch, and the report line and the unit conversion are guarded
+    # explicitly. This comment previously claimed cover_end_mm was "unused"
+    # when both ends are supported, which the report line then contradicted.
     cover_end_mm = (
         beam_covers.end_start_mm if beam_covers.end_start_mm is not None
         else beam_covers.end_end_mm
@@ -562,10 +568,24 @@ def main():
         "- " + role_grade_report_line(ROLE_STIRRUP, stirrup_bar_type_name)
         + " (positions the main bars; no stirrup is placed by this pushbutton)"
     )
+    # cover_end is None whenever BOTH ends are supported, which is the normal
+    # single-span case -- there is no exposed end face to read a cover from.
+    # Formatting it with {:.1f} regardless is what crashed v0.1.0-rc5:
+    # ValueError: Unknown format code 'f' for object of type 'str' (IronPython
+    # reports 'str' rather than 'NoneType' because ObjectOps.__format__
+    # stringifies before applying the spec). The comment above this block
+    # already said cover_end_mm "is unused" when both ends are supported --
+    # it was describing an intention the report line did not honour.
+    cover_end_report = (
+        "{:.1f} mm".format(cover_end_mm)
+        if cover_end_mm is not None
+        else "n/a (both ends supported -- no exposed end face)"
+    )
     output.print_md(
         "- b = {:.1f} mm, h = {:.1f} mm, cover_top = {:.1f} mm, cover_btm = {:.1f} mm, "
-        "cover_side = {:.1f} mm, cover_end = {:.1f} mm, O_stirrup = {:.1f} mm".format(
-            b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm, cover_end_mm, dia_stirrup_mm
+        "cover_side = {:.1f} mm, cover_end = {}, O_stirrup = {:.1f} mm".format(
+            b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
+            cover_end_report, dia_stirrup_mm
         )
     )
     output.print_md(
@@ -680,7 +700,14 @@ def main():
     else:
         ref_end = end_pt
 
-    cover_end_internal = mm_to_internal(cover_end_mm)
+    # Only ever CONSUMED at an unsupported end (see _place_face below,
+    # where it is the a_*_internal fallback), but was CONVERTED here
+    # unconditionally -- and mm_to_internal(None) raises inside
+    # UnitUtils.ConvertToInternalUnits. This was the next failure after
+    # the report line above, on the same None and the same normal case.
+    cover_end_internal = (
+        mm_to_internal(cover_end_mm) if cover_end_mm is not None else None
+    )
     du_internal, dv_internal = beam_section_centre_offsets(beam, start_pt)
 
     def _place_face(layer_offsets_mm, u_positions_mm, bend_direction, is_top,

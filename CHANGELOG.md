@@ -266,16 +266,32 @@ Nothing. `master` and `v0.1.0-rc1` are the same tree.
 - **#26 — the A7 clearance has no defined failure behaviour.** The tool warns
   and places anyway, which is a placeholder chosen to avoid inventing a
   detailing rule, not an answer. Needs a decision.
-- **The tool's own execution path has never run.** This is now the single
-  largest open risk, and it is what `v0.1.0-rc1` exists to test. Individual
-  API shapes *have* been confirmed against a live Revit 2024 host
-  (`RevitAPI 24.3.40.0`) — cover face reads, hook family and angle, the
-  z-datum, rotation — but every one of those probes was driven as **C#
-  through a connector**. Nothing has executed as **IronPython inside
-  pyRevit**, which means `pyrevit.forms.SelectFromList.show`'s signature,
-  `Rebar.CreateFromCurves` *as these scripts call it*, and the buttons'
-  end-to-end behaviour are all still unexercised. A green suite plus a live
-  API probe is not "the button works". See `CONTEXT.md`.
+- ~~**The tool's own execution path has never run.**~~ **Two of the three
+  pushbuttons now do.** As of `v0.1.0-rc5`, **"Place Stirrups" and "Place
+  Crack Bars" placed real reinforcement on a real beam** in Revit 2024 — so
+  `Rebar.CreateFromCurves` works as these scripts call it,
+  `pyrevit.forms.SelectFromList.show` takes the arguments they pass, and
+  `rpw.ui.forms.FlexForm` drives the inputs. That was the single largest
+  open risk in this project and it is now retired.
+
+  **"Place Main Bars" is still not working** — see the entry below.
+
+  Getting there took five candidates, and every failure was a wrong API
+  name rather than wrong detailing arithmetic: the `FlexForm` import module
+  (rc1), PEP 263 source encoding for IronPython 2.7 (rc2), `.Name` on an
+  `ElementType` (rc3), `GetBoundingBox` on a `GeometryInstance` (rc4). None
+  was caught by the test suite, and in three cases **the suite actively
+  concealed the defect** because a fake modelled an API shape that does not
+  exist. Each is now mirrored to the live surface with a test asserting the
+  absence, so restoring the convenience turns the suite red.
+
+- **"Place Main Bars" has not completed a run.** It clears the pickers, the
+  form, the geometry read and the cover reads, then fails in its own report
+  (`v0.1.0-rc5`: a numeric format applied to `cover_end_mm`, which is
+  `None` whenever both ends are supported — the normal single-span case).
+  Fixed for rc6, untested at the time of writing. Its report also showed
+  empty bar-type names, from `getattr(bar_type, "Name", "")` swallowing the
+  same IronPython binding failure rc3 hit head-on.
 
 ## Tickets closed
 

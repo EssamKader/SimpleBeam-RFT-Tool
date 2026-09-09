@@ -66,6 +66,7 @@ from rft.core.layout import layer_offset_mm
 from rft.revit.bar_types import (
     bar_type_diameter_mm,
     bar_type_options,
+    element_name,
 )
 from rft.revit.geometry import (
     beam_axis_direction,
@@ -212,10 +213,10 @@ def main():
     dia_btm_mm = bar_type_diameter_mm(btm_bar_type, internal_to_mm)
     dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
 
-    crack_bar_type_name = getattr(crack_bar_type, "Name", "")
-    top_bar_type_name = getattr(top_bar_type, "Name", "")
-    btm_bar_type_name = getattr(btm_bar_type, "Name", "")
-    stirrup_bar_type_name = getattr(stirrup_bar_type, "Name", "")
+    crack_bar_type_name = element_name(crack_bar_type)
+    top_bar_type_name = element_name(top_bar_type)
+    btm_bar_type_name = element_name(btm_bar_type)
+    stirrup_bar_type_name = element_name(stirrup_bar_type)
 
     # --- A42 mechanical grade-conflict guard: this run holds the mild
     # stirrup selection AND three high-tensile selections (crack, top,

@@ -52,6 +52,7 @@ from rft.revit.geometry import (
 )
 from rft.revit.bar_types import (
     bar_type_options,
+    element_name,
     hook_type_options,
     bar_type_diameter_mm,
     hook_angle_deg,
@@ -102,7 +103,8 @@ def select_bar_type_for_role(document, role):
 def select_hook_type(candidates):
     """Explicit selection of the Stirrup/Tie-family, 135-degree
     RebarHookType used for stirrups (rev 2 section 7.3, A45, supersedes
-    A33; issue #25) -- NO fallback to "the first one found". ``candidates``
+    A45, superseding A33; issue #25) -- NO fallback to "the first one
+    found". ``candidates``
     is the ALREADY-FILTERED list (``list_stirrup_hook_types``, style == 1)
     the caller in ``main`` obtained; this function only drives the picker
     UI, and so takes no ``document`` -- it has nothing left to collect. Returns None if the engineer cancels the picker -- an empty
@@ -205,7 +207,7 @@ def main():
     dia_stirrup_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
 
     stirrup_bar_type_id = getattr(bar_type, "Id", None)
-    stirrup_bar_type_name = getattr(bar_type, "Name", "")
+    stirrup_bar_type_name = element_name(bar_type)
 
     # No mechanical grade-conflict guard here: this run holds only the mild
     # stirrup selection, with no high-tensile selection to compare it
@@ -215,7 +217,7 @@ def main():
     # rested on an unconfirmed `Rebar.GetHostId()` and failed OPEN, so it
     # would have looked like a guard while protecting nothing.
 
-    hook_type_name = getattr(hook_type, "Name", None)
+    hook_type_name = element_name(hook_type)
 
     # --- issue #25/#31 (A45): the two-part guard, kept SEPARATE and
     # separately reported. Both halves are required, but a combined
@@ -343,16 +345,16 @@ def main():
     if hook_angle_unverified:
         output.print_md(
             "- **Hook type used: '{}'.** Its angle could NOT be read back "
-            "and verified against the required 180 degrees (rev 2 section "
-            "7.3, A33) -- see issue #25, still open. Confirm the 180-degree "
-            "angle manually before relying on this beam's stirrups.".format(
+            "and verified against the required 135 degrees (rev 2 section "
+            "7.3, A45). Confirm the 135-degree angle manually before relying "
+            "on this beam's stirrups.".format(
                 hook_type_name or "<unnamed>"
             )
         )
     else:
         output.print_md(
             "- Hook type used: '{}', angle read back and verified = {:.1f} "
-            "degrees (rev 2 section 7.3, A33).".format(hook_type_name or "<unnamed>", hook_angle_deg_value)
+            "degrees, required 135 (rev 2 section 7.3, A45).".format(hook_type_name or "<unnamed>", hook_angle_deg_value)
         )
 
     beam_total = 0
