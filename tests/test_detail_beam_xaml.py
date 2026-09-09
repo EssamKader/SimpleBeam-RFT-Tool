@@ -82,11 +82,13 @@ NOT_YET_REFERENCED = {
     "dense_spacing_tb", "normal_spacing_tb",
 }
 
-# The tab headers owned by #47 (U3) and #48 (U4) -- matched by substring
-# since ElementTree has no attribute-value XPath matching. "Review" is
-# deliberately excluded: it is #50's (U6) scope and stays a placeholder,
-# so a control added there would not yet be read by this script.py either.
-OWNED_TAB_HEADER_SUBSTRINGS = ("Beam", "Main bars", "Stirrups", "Crack bars")
+# The tab headers owned by #47 (U3), #48 (U4) and #50 (U6) -- matched by
+# substring since ElementTree has no attribute-value XPath matching.
+# "Review" is INCLUDED as of #50 (U6): it is no longer a placeholder, so a
+# control added there and never referenced by script.py is exactly the
+# dead-XAML/typo risk this reverse check exists to catch on every other
+# owned tab.
+OWNED_TAB_HEADER_SUBSTRINGS = ("Beam", "Main bars", "Stirrups", "Crack bars", "Review")
 
 
 def _xaml_names():
@@ -110,11 +112,11 @@ def _beam_materials_tab_names():
 
 
 def _owned_tabs_names():
-    """x:Name elements inside every TabItem #47/#48 own -- Beam &
-    Materials, Main bars, Stirrups and Crack bars (issue #48, U4: the
-    reverse check's scope extends from just Beam & Materials to these
-    three new tabs). "Review" (#50, U6) is excluded on purpose -- it is
-    still a genuine placeholder, not this ticket's scope.
+    """x:Name elements inside every TabItem #47/#48/#50 own -- Beam &
+    Materials, Main bars, Stirrups, Crack bars and Review (issue #48, U4
+    extended the reverse check's scope from just Beam & Materials to the
+    first three of those; issue #50, U6 extends it again to Review, which
+    is no longer a placeholder).
     """
     tree = ET.parse(XAML_PATH)
     ns = "{http://schemas.microsoft.com/winfx/2006/xaml/presentation}"
@@ -375,4 +377,47 @@ def test_modeless_window_declares_a_persistent_engine():
         "bundle.yaml must declare engine.persistent: true -- the Detail "
         "Beam window is modeless and its Revit API calls are delivered by "
         "an ExternalEvent after the script returns (#59)."
+    )
+
+
+# --- Place must not be enabled and then refuse ----------------------------
+
+
+def test_place_preflight_consults_the_same_derivation_that_enables_it():
+    """#50 made Place's ENABLED state follow the Review derivation, while
+    the pre-flight guard still demanded top main, bottom main and stirrup
+    bar types unconditionally (#48's rule).
+
+    The two disagreed in a way the engineer could see: request stirrups
+    only, Review says "Stirrups: will be placed", Place lights up -- and
+    then refuses, naming main bars nobody asked to place. A button that
+    invites a click and then rejects it is worse than one that stays
+    greyed out, because it makes the engineer doubt the tool rather than
+    their input.
+
+    The guard must therefore be scoped by the SAME derivation object that
+    sets IsEnabled, so the two cannot drift apart again.
+    """
+    body = _method_body("_missing_bar_type_and_hook_messages")
+    assert "review." in body, (
+        "_missing_bar_type_and_hook_messages must be scoped by the Review "
+        "derivation that enables the Place button, or the two can "
+        "disagree and Place will refuse a click it invited."
+    )
+    assert "any_requested" in body, (
+        "it must return nothing when nothing is requested -- that case is "
+        "already handled by disabling the button."
+    )
+
+
+def test_the_unconditional_required_roles_list_is_gone():
+    """The constant the contradiction was built on. Kept as a named test
+    so re-adding it has to be a deliberate act with a reason.
+    """
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    assert "REQUIRED_BAR_TYPE_ROLES_FOR_PLACE = (" not in text, (
+        "this list demanded a bar type per role regardless of what was "
+        "requested. What each section actually consumes is narrower: the "
+        "stirrup BAR type is needed by every section (layer offsets, "
+        "crack-bar positions), the stirrup HOOK only by stirrups."
     )

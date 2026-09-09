@@ -260,14 +260,51 @@
                 </StackPanel>
             </TabItem>
 
+            <!-- #50 (U6): the derivation rule (rev 2 section 8, A47/A50)
+ states, per section, whether it will be placed and WHY when it
+ will not: review_derivation_tb, updated live (no Revit call,
+ since a bar/hook type is only ever tested "is this None"), never
+ only at Place time. Place itself is disabled whenever nothing at
+ all is requested (this ticket's brief); its IsEnabled is owned
+ by script.py's _refresh_review_derivation, not a static XAML
+ default, so there is exactly one place that decision is made.
+ The full section 8.2/A37 report reads bar type names/diameters
+ and re-detects supports, genuine Revit API calls, so it sits
+ behind its own "Build full report" button, dispatched (#57)
+ rather than recomputed on every keystroke. A copy is also
+ written to the pyRevit output window (A37). Placement itself
+ stays #56's scope: pressing Place opens ONE Transaction (A46),
+ calls into _do_place, and rolls back entirely on any exception,
+ guaranteed right now, since placement is still a stub. -->
             <TabItem Header="Review">
-                <StackPanel Margin="10">
-                    <TextBlock FontWeight="Bold" Text="Review -- placeholder" TextWrapping="Wrap"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,10"
-                               Text="The derived placement list and the full section/6.2-6.4/7/8.2 report are implemented by issue #50 (U6). This shell only builds the transaction boundary: pressing Place opens ONE Transaction (A46), calls into placement, and rolls back entirely on any exception -- which is guaranteed right now, since placement itself is not implemented yet."/>
-                    <Button x:Name="place_btn" Content="Place" HorizontalAlignment="Left" Padding="18,6"/>
-                    <TextBlock x:Name="place_result_tb" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#FFB00000" Text=""/>
-                </StackPanel>
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" FontWeight="Bold" TextWrapping="Wrap"
+                               Text="Review -- derived placement list (rev 2 section 8, A47/A50)"/>
+                    <TextBlock x:Name="review_derivation_tb" Grid.Row="1" TextWrapping="Wrap"
+                               Margin="0,6,0,10" Text=""/>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button x:Name="build_report_btn" Content="Build full report"
+                                Padding="14,4" Margin="0,0,10,0"/>
+                        <Button x:Name="place_btn" Content="Place" Padding="18,4"/>
+                    </StackPanel>
+
+                    <TextBox x:Name="review_report_tb" Grid.Row="3" IsReadOnly="True"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             TextWrapping="NoWrap" AcceptsReturn="True" FontFamily="Consolas"
+                             Background="#FFF5F5F5" Text=""/>
+
+                    <TextBlock x:Name="place_result_tb" Grid.Row="4" TextWrapping="Wrap"
+                               Margin="0,10,0,0" Foreground="#FFB00000" Text=""/>
+                </Grid>
             </TabItem>
         </TabControl>
 

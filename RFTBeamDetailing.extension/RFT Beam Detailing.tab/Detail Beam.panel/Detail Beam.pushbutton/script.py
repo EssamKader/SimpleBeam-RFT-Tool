@@ -60,14 +60,35 @@ place a stirrup ``RebarBarType`` can come from.
 
 from pyrevit import forms, revit, script
 
-from rft.core.anchorage import DEFAULT_LD_BTM_MULTIPLIER, DEFAULT_LD_TOP_MULTIPLIER
+from rft.core.anchorage import (
+    DEFAULT_LD_BTM_MULTIPLIER,
+    DEFAULT_LD_TOP_MULTIPLIER,
+    bottom_bar_anchorage,
+    development_length,
+    free_end_configuration_warning,
+    top_bar_anchorage,
+    top_bottom_clearance_warning,
+    unsupported_end_anchorage,
+)
 from rft.core.crack_bars import (
     DEFAULT_S_MAX_MM,
     available_height_mm,
+    crack_bar_end_result,
+    crack_bar_u_positions_mm,
+    crack_layer_plan,
+    crack_layer_v_positions_mm,
     crack_reinforcement_triggered,
+    spacing_validation_exemption_note,
 )
 from rft.core.guards import stirrup_type3_guard_message
-from rft.core.layout import MAX_LAYERS, layer_offset_mm
+from rft.core.layout import (
+    MAX_LAYERS,
+    corner_bar_u_positions_mm,
+    layer_offset_mm,
+    main_layer_v_positions_mm,
+    spacer_diameter_warning,
+    spacer_length_mm,
+)
 from rft.core.grades import (
     ROLE_BOTTOM_MAIN,
     ROLE_CRACK,
@@ -78,8 +99,17 @@ from rft.core.grades import (
     missing_bar_type_selection_message,
     missing_hook_type_selection_message,
     no_usable_hook_type_message,
+    role_grade_report_line,
     role_picker_label,
     unreadable_hook_style_message,
+)
+from rft.core.spacing import governing_min_spacing_mm, validate_face_spacing
+from rft.core.stirrups import (
+    centreline_leg_dimensions_mm,
+    stirrup_count_and_spacing,
+    stirrup_zones_mm,
+    zone_array_length_mm,
+    ZONE_LAYOUT_FLAGS,
 )
 from rft.revit.bar_types import (
     bar_type_diameter_mm,
@@ -96,6 +126,7 @@ from rft.revit.geometry import (
     beam_section_axes,
     beam_section_dimensions_mm,
     find_supporting_element,
+    span_length_mm,
     support_width_along_axis_mm,
 )
 from rft.revit.guards import continuous_run_guard
@@ -107,6 +138,7 @@ from rft.revit.host import (
 )
 from rft.revit.placement import run_in_transaction
 from rft.revit.units import internal_to_mm, mm_to_internal
+from rft.ui import derivation as ui_derivation
 from rft.ui import inputs as ui_inputs
 
 output = script.get_output()
@@ -126,16 +158,32 @@ BAR_TYPE_ROLE_ROWS = (
     (ROLE_CRACK, "crack_bar_type", "crack_bar_combo", "crack_bar_label_tb"),
 )
 
-# Roles Place refuses on if unset. Crack bars are deliberately EXCLUDED:
-# whether a crack bar type is REQUIRED depends on h > 700 (rev 2 section
-# 5), a derivation that belongs to the Review tab (#50, U6) and does not
-# exist yet -- forcing a crack-bar selection here for every beam, including
-# one with h <= 700, would be this ticket inventing U6's rule early.
-REQUIRED_BAR_TYPE_ROLES_FOR_PLACE = (
-    (ROLE_TOP_MAIN, "top_main_bar_type"),
-    (ROLE_BOTTOM_MAIN, "bottom_main_bar_type"),
-    (ROLE_STIRRUP, "stirrup_bar_type"),
-)
+# What Place additionally requires, ON TOP of what the Review derivation
+# (#50) has already established as requested.
+#
+# #48 pinned this list to "top main, bottom main, stirrup, always". Once
+# #50 made Place's ENABLED state follow the derivation, that became a
+# contradiction the engineer could see: request stirrups only, Review says
+# "Stirrups: will be placed", Place lights up -- and then refuses, naming
+# top and bottom main bars it was never asked to place.
+#
+# The rule now follows what each section actually consumes, read from the
+# three verified pushbuttons rather than assumed:
+#
+#   - The STIRRUP BAR TYPE is needed by EVERY section, not just stirrups.
+#     Main bars need its diameter for the layer offsets (section 4.1) and
+#     crack bars for their horizontal positions (crack_bar_u_positions_mm).
+#     So it is required whenever anything at all is placed.
+#   - The STIRRUP HOOK TYPE is needed ONLY by stirrups. "Place Main Bars"
+#     uses no RebarHookType at all -- a main bar's bent end is geometry
+#     (section 2.5), not a hook type -- and neither does "Place Crack
+#     Bars".
+#   - Each face's own main-bar type, and the crack bar type, are implied by
+#     the derivation itself: a face is not REQUESTED without its type.
+#
+# A42's no-fallback rule is unchanged. Nothing here defaults to a "first
+# found" type; this only stops Place demanding a selection for
+# reinforcement nobody asked to place.
 
 
 class BeamMaterialsSelection(object):
@@ -245,6 +293,7 @@ class DetailBeamWindow(forms.WPFWindow):
 
         self.pick_btn.Click += self.on_pick_click
         self.place_btn.Click += self.on_place_click
+        self.build_report_btn.Click += self.on_build_report_click
 
         # Bar/hook types are DOCUMENT-scoped, not beam-scoped (a
         # RebarBarType does not belong to any one beam), so the pickers
@@ -268,7 +317,19 @@ class DetailBeamWindow(forms.WPFWindow):
         self.bottom_layers_tb.TextChanged += self._on_h_or_layout_changed
         self.spacer_dia_tb.TextChanged += self._on_h_or_layout_changed
 
+        # #50 (U6) -- the derivation rule needs only the bar counts beyond
+        # what #48 already tracks live: main bar counts per face. Nothing
+        # here touches the Revit API (a bar count is parsed text, a bar/
+        # hook type is "is this None or not"), so this stays on the UI
+        # thread, unlike the report itself (see on_build_report_click).
+        self.top_bar_count_tb.TextChanged += self._refresh_review_derivation
+        self.bottom_bar_count_tb.TextChanged += self._refresh_review_derivation
+
         self._reset_beam_state(message="No beam picked yet.")
+        # Sets the initial "nothing requested -- Place disabled" state
+        # (this ticket's brief) -- without this call Place would open
+        # enabled until the first keystroke or pick touched a wired field.
+        self._refresh_review_derivation()
 
     # ------------------------------------------------------- bar/hook types
     def _populate_material_pickers(self):
@@ -325,6 +386,10 @@ class DetailBeamWindow(forms.WPFWindow):
         # ``self.selection``, so every role's picker re-triggers the same
         # refresh rather than only the two main-bar roles.
         self._refresh_h_avail()
+        # #50 (U6) -- every role's picker can flip a section's requested
+        # state (a main-bar face on its own type, crack bars on ITS type
+        # plus both faces' types, A50).
+        self._refresh_review_derivation()
 
     def _on_hook_type_selected(self, sender, args):
         """Rev 2 section 7.3 (A45): the selection is re-checked AFTER
@@ -339,6 +404,7 @@ class DetailBeamWindow(forms.WPFWindow):
         if label is None:
             self.selection.stirrup_hook_type = None
             self.selection.stirrup_hook_angle_deg = None
+            self._refresh_review_derivation()
             return
         hook_type = dict(self._hook_type_options)[label]
         hook_type_name = element_name(hook_type)
@@ -351,12 +417,14 @@ class DetailBeamWindow(forms.WPFWindow):
             )
             sender.SelectedIndex = -1
             self.selection.stirrup_hook_type = None
+            self._refresh_review_derivation()
             return
         style_violation = hook_style_guard_message(style, hook_type_name=hook_type_name)
         if style_violation:
             forms.alert(style_violation.message, title="Stirrup hook family is not Stirrup/Tie")
             sender.SelectedIndex = -1
             self.selection.stirrup_hook_type = None
+            self._refresh_review_derivation()
             return
 
         angle_deg = hook_angle_deg(hook_type)
@@ -384,6 +452,7 @@ class DetailBeamWindow(forms.WPFWindow):
                 forms.alert(angle_violation.message, title="Stirrup hook angle is not 135 degrees")
                 sender.SelectedIndex = -1
                 self.selection.stirrup_hook_type = None
+                self._refresh_review_derivation()
                 return
             # Nothing wrong to report, so this red status line goes quiet.
             # The POSITIVE confirmation ("angle read back = 135.0") is the
@@ -393,6 +462,10 @@ class DetailBeamWindow(forms.WPFWindow):
 
         self.selection.stirrup_hook_angle_deg = angle_deg
         self.selection.stirrup_hook_type = hook_type
+        # #50 (U6) -- the hook is stirrup-exclusive, so only this handler
+        # (never the main-bar-type handlers) can flip the stirrups section's
+        # requested state.
+        self._refresh_review_derivation()
 
     # --------------------------------------------------- U4 reinforcement tabs
     def _populate_reinforcement_tab_defaults(self):
@@ -474,6 +547,10 @@ class DetailBeamWindow(forms.WPFWindow):
         if h_mm is not None:
             self.crack_bars_tab.IsEnabled = crack_reinforcement_triggered(h_mm)
         self._refresh_h_avail()
+        # #50 (U6) -- h and the layer counts all feed the crack-bars
+        # derivation (A50), so the Review tab must track the same edits
+        # H_avail already does.
+        self._refresh_review_derivation()
 
     def _refresh_h_avail(self):
         """H_avail (rev 2 section 5.1, A26), DISPLAYED, never entered (this
@@ -549,6 +626,638 @@ class DetailBeamWindow(forms.WPFWindow):
         self.h_avail_tb.Text = "H_avail = {:.1f} mm (rev 2 section 5.1, A26).".format(
             h_avail_mm
         )
+
+    # --------------------------------------------------------- U6 Review tab
+    #
+    # Two halves, deliberately split by whether they touch the Revit API
+    # (this ticket's own constraint):
+    #
+    # 1. THE DERIVATION (``rft.ui.derivation``) is pure logic over values
+    #    already held -- a bar/hook type is only ever tested "is this None",
+    #    never read for a property -- so it stays on the UI thread and
+    #    recomputes live on every relevant edit, exactly like #48's H_avail.
+    # 2. THE FULL REPORT (section 8.2, A37) reads bar type NAMES and
+    #    DIAMETERS off already-selected elements, and re-detects supports --
+    #    all genuine Revit API calls -- so it is built only inside
+    #    ``_dispatch_to_revit_context``, behind its own "Build full report"
+    #    button, never on a keystroke.
+
+    def _try_parse_optional_int(self, text, field_label):
+        """Tolerant wrapper for the derivation/report refresh handlers,
+        which run on every keystroke and must never raise: an in-progress
+        or invalid count/layer edit degrades to ``None`` -- "not entered
+        yet" -- exactly like ``_refresh_h_avail`` already treats it.
+        """
+        try:
+            return ui_inputs.parse_optional_positive_int(
+                text, field_label, max_value=MAX_LAYERS
+            )
+        except ValueError:
+            return None
+
+    def _compute_review_derivation(self):
+        """The whole Review-tab derivation (issue #50, U6), read from
+        ``self.selection`` (the one attribute per role) and the tab
+        TextBoxes -- no second collector call, no Revit read.
+        """
+        top_bar_count = self._try_parse_optional_int(
+            self.top_bar_count_tb.Text, "Top bar count per layer"
+        )
+        bottom_bar_count = self._try_parse_optional_int(
+            self.bottom_bar_count_tb.Text, "Bottom bar count per layer"
+        )
+        layers_top = self._try_parse_optional_int(
+            self.top_layers_tb.Text, "Number of top layers"
+        )
+        layers_btm = self._try_parse_optional_int(
+            self.bottom_layers_tb.Text, "Number of bottom layers"
+        )
+        h_mm = ui_inputs.try_parse_float(self.h_tb.Text)
+        return ui_derivation.compute_review_derivation(
+            top_bar_type_selected=self.selection.top_main_bar_type,
+            top_bar_count=top_bar_count,
+            bottom_bar_type_selected=self.selection.bottom_main_bar_type,
+            bottom_bar_count=bottom_bar_count,
+            hook_type_selected=self.selection.stirrup_hook_type,
+            crack_bar_type_selected=self.selection.crack_bar_type,
+            h_mm=h_mm,
+            layers_top=layers_top,
+            layers_btm=layers_btm,
+        )
+
+    def _refresh_review_derivation(self, sender=None, args=None):
+        """Recomputes the derivation and updates the Review tab AND the
+        Place button's enabled state (this ticket's brief: "Place is
+        disabled when nothing is requested, and says so"). Wired as both a
+        plain method call and a WPF event handler (hence the optional
+        ``sender``/``args``), exactly like ``_on_h_or_layout_changed``.
+        """
+        review = self._compute_review_derivation()
+        lines = [
+            review.top_main.reason,
+            review.bottom_main.reason,
+            review.stirrups.reason,
+            review.crack_bars.reason,
+        ]
+        if not review.any_requested:
+            lines.append(
+                "Nothing is requested yet -- Place is disabled (rev 2 "
+                "section 8, this ticket's derivation rule)."
+            )
+        self.review_derivation_tb.Text = "\n".join(lines)
+        self.place_btn.IsEnabled = review.any_requested
+
+    def on_build_report_click(self, sender, args):
+        """WPF click handler. Does no Revit work itself (#57) -- the full
+        report reads bar type names/diameters and re-detects supports,
+        which are genuine Revit API calls, so building it is dispatched.
+        """
+        self._dispatch_to_revit_context(
+            self._build_review_report_in_context, "Build report"
+        )
+
+    def _set_review_report(self, lines):
+        """Writes the report to the Review tab AND to the pyRevit output
+        window (A37: Review is where it is read, the output window is
+        where it is kept -- scrollable, copyable, and it survives closing
+        the dialog).
+        """
+        self.review_report_tb.Text = "\n".join(lines)
+        output.print_md("### Detail Beam -- Review report (rev 2 section 8.2, A37)")
+        for line in lines:
+            output.print_md(line)
+
+    def _build_review_report_in_context(self):
+        """The full section 8.2/A37 report: derivation status for every
+        section, then per-layer offsets/positions, governing/achieved
+        spacing, anchorage a/b/LD per end, stirrup zones and counts, the
+        crack-bar plan, the grade required per role against the bar type
+        USED (``role_grade_report_line``), and every warning raised --
+        for whichever sections the derivation above actually requested.
+
+        Runs inside Revit's API context (dispatched) because bar type
+        names/diameters and support re-detection are read here.
+        """
+        review = self._compute_review_derivation()
+        lines = [
+            "Derivation (rev 2 section 8, A47/A50):",
+            "- " + review.top_main.reason,
+            "- " + review.bottom_main.reason,
+            "- " + review.stirrups.reason,
+            "- " + review.crack_bars.reason,
+        ]
+        if not review.any_requested:
+            lines.append("- **Nothing is requested. Place is disabled.**")
+        lines.append("")
+
+        if self.beam is None:
+            lines.append(
+                "Pick a beam on the Beam & Materials tab to see the full "
+                "section 8.2 report."
+            )
+            self._set_review_report(lines)
+            return
+
+        try:
+            b_mm = _parse_positive_float(self.b_tb.Text, "b")
+            h_mm = _parse_positive_float(self.h_tb.Text, "h")
+        except ValueError as ex:
+            lines.append("Geometry is not valid yet -- {}".format(ex))
+            self._set_review_report(lines)
+            return
+
+        geometry = self._gather_report_geometry(b_mm, h_mm)
+        if "error" in geometry:
+            lines.append(geometry["error"])
+            self._set_review_report(lines)
+            return
+
+        if review.top_main.requested or review.bottom_main.requested:
+            lines += self._report_main_bars_lines(review, geometry)
+        if review.stirrups.requested:
+            lines += self._report_stirrups_lines(geometry)
+        if review.crack_bars.requested:
+            lines += self._report_crack_bars_lines(geometry)
+
+        self._set_review_report(lines)
+
+    def _gather_report_geometry(self, b_mm, h_mm):
+        """Beam/support geometry the report needs, re-detected from
+        ``self.beam`` (the same helper functions ``_pick_beam_in_context``
+        already uses) rather than cached from pick time -- support width
+        and cover are never stored on ``self`` today; only their formatted
+        TextBlock strings are, which the report cannot recompute anything
+        from. Returns a dict with an ``"error"`` key on any failure,
+        instead of raising, so one bad read degrades to a report line
+        rather than losing the whole report.
+        """
+        beam = self.beam
+        try:
+            start_pt, end_pt = beam_endpoints(beam)
+            axis = beam_axis_direction(beam)
+        except Exception as ex:
+            return {"error": "Could not read beam geometry -- {}: {}".format(type(ex).__name__, ex)}
+
+        support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
+        support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
+        is_supported_start = support_start is not None
+        is_supported_end = support_end is not None
+
+        support_cover_start_mm = support_cover_end_mm = None
+        try:
+            if is_supported_start:
+                support_start_host_data = validate_rebar_host(support_start)
+                support_cover_start_mm = read_support_side_cover_mm(
+                    support_start, support_start_host_data, axis, True, internal_to_mm,
+                    element_id=support_start.Id,
+                )
+            if is_supported_end:
+                support_end_host_data = validate_rebar_host(support_end)
+                support_cover_end_mm = read_support_side_cover_mm(
+                    support_end, support_end_host_data, axis, False, internal_to_mm,
+                    element_id=support_end.Id,
+                )
+        except HostValidationError as ex:
+            return {"error": "Support cover read-back failed -- {}".format(ex)}
+
+        l_mm = None
+        if is_supported_start and is_supported_end:
+            l_mm = span_length_mm(support_start, support_end, internal_to_mm)
+
+        return {
+            "b_mm": b_mm, "h_mm": h_mm,
+            "cover_top_mm": self.beam_covers_mm.top_mm,
+            "cover_btm_mm": self.beam_covers_mm.bottom_mm,
+            "cover_side_mm": self.beam_covers_mm.side_mm,
+            "cover_end_start_mm": self.beam_covers_mm.end_start_mm,
+            "cover_end_end_mm": self.beam_covers_mm.end_end_mm,
+            "is_supported_start": is_supported_start,
+            "is_supported_end": is_supported_end,
+            "support_width_start_mm": support_width_start_mm,
+            "support_width_end_mm": support_width_end_mm,
+            "support_cover_start_mm": support_cover_start_mm,
+            "support_cover_end_mm": support_cover_end_mm,
+            "l_mm": l_mm,
+        }
+
+    def _end_anchorage_result(self, is_supported, support_width_mm, support_cover_mm,
+                               dia_own_mm, dia_other_mm, ld_mm, is_top, cover_end_mm, end_label):
+        """Ported from "Place Main Bars.pushbutton"'s own ``end_anchorage``
+        nested helper: a=formula/capped result at a supported end (§2.1-
+        §2.3), or a straight run to ``beam end - cover`` with no hook at an
+        unsupported one (§2.5, A12, R3). Returns (a_mm, b_mm_or_None,
+        warning_or_None).
+        """
+        if is_supported:
+            if is_top:
+                result = top_bar_anchorage(support_width_mm, support_cover_mm, dia_other_mm, ld_mm)
+            else:
+                result = bottom_bar_anchorage(support_width_mm, support_cover_mm, ld_mm)
+            return result.a, result.b, None
+        result = unsupported_end_anchorage(0.0, ld_mm, terminates_short_of_end_mm=cover_end_mm)
+        warning = "{}: {}".format(end_label, result.warning) if result.warning else None
+        return result.achieved_length_mm, None, warning
+
+    def _format_end_result(self, a_mm, b_mm):
+        """Ported verbatim (wording) from "Place Main Bars.pushbutton"."""
+        if b_mm is None:
+            return "achieved={:.1f} mm (no hook, unsupported)".format(a_mm)
+        return "a={:.1f} mm, b={:.1f} mm".format(a_mm, b_mm)
+
+    def _report_main_bars_lines(self, review, geometry):
+        """Main bars section of the report (rev 2 section 2, 4, 4.1, 6.1,
+        6.2-6.4) -- wording ported from "Place Main Bars.pushbutton" where
+        it applies to only ONE requested face rather than always both.
+        """
+        lines = ["", "Main bars (rev 2 section 2, 4, 4.1, 6.1, 6.2-6.4):"]
+
+        stirrup_bar_type = self.selection.stirrup_bar_type
+        if stirrup_bar_type is None:
+            lines.append(
+                "- Cannot compute main bar layout: no stirrup RebarBarType "
+                "selected on Beam & Materials. It positions every main bar "
+                "via section 4's layer offsets and section 6.1's corner-bar "
+                "inset, even when this run does not also place stirrups."
+            )
+            return lines
+        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+        lines.append(
+            "- " + role_grade_report_line(ROLE_STIRRUP, element_name(stirrup_bar_type))
+            + " (positions the main bars; placed only if stirrups are also requested)"
+        )
+
+        try:
+            spacer_dia_mm = ui_inputs.parse_positive_float(self.spacer_dia_tb.Text, "O_spacer")
+            d_agg_mm = ui_inputs.parse_optional_positive_float(self.d_agg_tb.Text, "D_agg")
+            min_spacing_override_mm = ui_inputs.parse_optional_positive_float(
+                self.min_spacing_override_tb.Text, "min-spacing override"
+            )
+            ld_top_mult = ui_inputs.parse_positive_float(self.ld_top_mult_tb.Text, "LD_top multiplier")
+            ld_btm_mult = ui_inputs.parse_positive_float(self.ld_btm_mult_tb.Text, "LD_btm multiplier")
+        except ValueError as ex:
+            lines.append("- Cannot compute main bar layout: {}".format(ex))
+            return lines
+
+        top_dia_mm = (
+            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
+            if self.selection.top_main_bar_type is not None else None
+        )
+        btm_dia_mm = (
+            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
+            if self.selection.bottom_main_bar_type is not None else None
+        )
+
+        faces = (
+            ("Top", ROLE_TOP_MAIN, review.top_main, self.selection.top_main_bar_type, top_dia_mm,
+             btm_dia_mm, self.top_bar_count_tb.Text, self.top_layers_tb.Text,
+             self.top_face_option_combo.SelectedItem, ld_top_mult, True),
+            ("Bottom", ROLE_BOTTOM_MAIN, review.bottom_main, self.selection.bottom_main_bar_type, btm_dia_mm,
+             top_dia_mm, self.bottom_bar_count_tb.Text, self.bottom_layers_tb.Text,
+             self.bottom_face_option_combo.SelectedItem, ld_btm_mult, False),
+        )
+        for (face_label, role, face_derivation, bar_type, dia_own_mm, dia_other_mm,
+             count_text, layers_text, option_label, ld_mult, is_top) in faces:
+            if not face_derivation.requested:
+                lines.append("- {} face: not requested.".format(face_label))
+                continue
+            lines.append(
+                "- " + role_grade_report_line(role, element_name(bar_type))
+            )
+            lines += self._report_one_main_face(
+                face_label, dia_own_mm, dia_other_mm, count_text, layers_text, option_label,
+                ld_mult, is_top, dia_stirrup_mm, spacer_dia_mm, d_agg_mm,
+                min_spacing_override_mm, geometry,
+            )
+
+        if review.top_main.requested and review.bottom_main.requested:
+            clearance_warning = top_bottom_clearance_warning(top_dia_mm, btm_dia_mm)
+            lines.append(
+                "- Top/bottom centreline clearance (section 2.2, A7): achieved "
+                "= O_BTM = {:.1f} mm, required = (O_TOP+O_BTM)/2 = {:.1f} mm.".format(
+                    btm_dia_mm, 0.5 * (top_dia_mm + btm_dia_mm)
+                )
+            )
+            if clearance_warning:
+                lines.append("- **A7 clearance warning:** {}".format(clearance_warning))
+        return lines
+
+    def _report_one_main_face(self, face_label, dia_own_mm, dia_other_mm, count_text,
+                               layers_text, option_label, ld_mult, is_top, dia_stirrup_mm,
+                               spacer_dia_mm, d_agg_mm, min_spacing_override_mm, geometry):
+        lines = []
+        try:
+            count = ui_inputs.parse_optional_positive_int(count_text, "{} bar count per layer".format(face_label))
+            layers = ui_inputs.parse_optional_positive_int(
+                layers_text, "Number of {} layers".format(face_label.lower()), max_value=MAX_LAYERS
+            )
+        except ValueError as ex:
+            lines.append("  - Cannot compute {} face layout: {}".format(face_label.lower(), ex))
+            return lines
+        if count is None or layers is None:
+            lines.append("  - Cannot compute {} face layout: missing count/layers.".format(face_label.lower()))
+            return lines
+
+        option = ui_inputs.face_option_from_label(option_label)
+        if option is None:
+            lines.append("  - Cannot compute {} face layout: no section 6.3 option selected.".format(face_label.lower()))
+            return lines
+
+        governing_min_mm = governing_min_spacing_mm(dia_own_mm, d_agg_mm, min_spacing_override_mm)
+        spacing_report = validate_face_spacing(
+            "{} face".format(face_label), option, [count] * layers, geometry["b_mm"],
+            geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm, governing_min_mm,
+        )
+        lines.append("  - section 6.2 governing min_spacing = {:.1f} mm".format(governing_min_mm))
+        for r in spacing_report.layer_results:
+            lines.append(
+                "  - section 6.3/6.4 layer {}: {} bars, achieved clear spacing = {}".format(
+                    r.layer_index, r.bar_count,
+                    "{:.1f} mm ({})".format(r.achieved_clear_mm, "PASS" if r.passes else "FAIL")
+                    if r.achieved_clear_mm is not None
+                    else "n/a (single bar, no horizontal spacing question)",
+                )
+            )
+        for g in spacing_report.guard_messages:
+            lines.append("  - **REFUSED (section 6.2-6.4):** {}".format(g.message))
+
+        cover_mm = geometry["cover_top_mm"] if is_top else geometry["cover_btm_mm"]
+        layer_offsets_mm = [
+            layer_offset_mm(cover_mm, dia_stirrup_mm, dia_own_mm, spacer_dia_mm, n)
+            for n in range(1, layers + 1)
+        ]
+        v_positions_mm = main_layer_v_positions_mm(geometry["h_mm"], layer_offsets_mm, is_top)
+        for n, (offset_mm, v_mm) in enumerate(zip(layer_offsets_mm, v_positions_mm), start=1):
+            lines.append("  - layer {}: offset_{} = {:.1f} mm, v = {:.1f} mm".format(n, n, offset_mm, v_mm))
+
+        try:
+            u_positions_mm = corner_bar_u_positions_mm(
+                geometry["b_mm"], geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm, count
+            )
+            lines.append(
+                "  - corner-bar u positions ({} bars): {}".format(
+                    count, ", ".join("{:.1f}".format(u) for u in u_positions_mm)
+                )
+            )
+        except ValueError as ex:
+            lines.append("  - corner-bar positions: {}".format(ex))
+
+        if layers > 1:
+            r1_min_mm = governing_min_spacing_mm(dia_own_mm, d_agg_mm)
+            spacer_warning = spacer_diameter_warning(spacer_dia_mm, r1_min_mm)
+            if spacer_warning:
+                lines.append("  - **R1 warning:** {}".format(spacer_warning))
+
+        if dia_other_mm is None and is_top:
+            lines.append(
+                "  - LD_top = {:.0f} x {:.1f} = ... mm: cannot compute end anchorage -- "
+                "section 2.1's a_t formula needs O_BTM (the bottom main bar's own "
+                "diameter), which is not available because the bottom face is not "
+                "requested (this is a gap in independent-face anchorage, not an "
+                "assumed value).".format(ld_mult, dia_own_mm)
+            )
+            return lines
+
+        ld_mm = development_length(dia_own_mm, ld_mult)
+        try:
+            a_start_mm, b_start_mm, w_start = self._end_anchorage_result(
+                geometry["is_supported_start"], geometry["support_width_start_mm"],
+                geometry["support_cover_start_mm"], dia_own_mm, dia_other_mm, ld_mm, is_top,
+                geometry["cover_end_start_mm"], "{} face, start end".format(face_label),
+            )
+            a_end_mm, b_end_mm, w_end = self._end_anchorage_result(
+                geometry["is_supported_end"], geometry["support_width_end_mm"],
+                geometry["support_cover_end_mm"], dia_own_mm, dia_other_mm, ld_mm, is_top,
+                geometry["cover_end_end_mm"], "{} face, end end".format(face_label),
+            )
+        except ValueError as ex:
+            lines.append("  - Cannot compute end anchorage: {}".format(ex))
+            return lines
+        lines.append(
+            "  - LD = {:.0f} x {:.1f} = {:.1f} mm -> start: {}; end: {}".format(
+                ld_mult, dia_own_mm, ld_mm,
+                self._format_end_result(a_start_mm, b_start_mm),
+                self._format_end_result(a_end_mm, b_end_mm),
+            )
+        )
+        for w in (w_start, w_end):
+            if w:
+                lines.append("  - **WARNING:** {}".format(w))
+        if not geometry["is_supported_start"]:
+            lines.append("  - **WARNING:** Start end: {}".format(free_end_configuration_warning()))
+        if not geometry["is_supported_end"]:
+            lines.append("  - **WARNING:** End end: {}".format(free_end_configuration_warning()))
+
+        # NOT DONE HERE: "Place Main Bars.pushbutton"'s as-built A7 cross-check
+        # (``placed_clearance_warning``) compares the TOP and BOTTOM bar's
+        # placed `a` at the SAME end, which this per-face loop -- one face at
+        # a time, by construction (#50's independent-face derivation) -- does
+        # not hold both of at once. Left unreported here rather than computed
+        # from a placeholder value for the other face; see this ticket's
+        # closing report for this gap.
+        return lines
+
+    def _report_stirrups_lines(self, geometry):
+        """Stirrups section (rev 2 section 3, 7) -- wording ported from
+        "Place Stirrups.pushbutton".
+        """
+        lines = ["", "Stirrups (rev 2 section 3, 7):"]
+        stirrup_bar_type = self.selection.stirrup_bar_type
+        if stirrup_bar_type is None:
+            lines.append("- Cannot compute stirrup geometry: no stirrup RebarBarType selected.")
+            return lines
+        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+        lines.append("- " + role_grade_report_line(ROLE_STIRRUP, element_name(stirrup_bar_type)))
+
+        hook_type = self.selection.stirrup_hook_type
+        hook_type_name = element_name(hook_type) if hook_type is not None else "<none>"
+        if self.selection.stirrup_hook_angle_deg is None:
+            lines.append(
+                "- **Hook type used: '{}'.** Its angle could NOT be read back and "
+                "verified against the required 135 degrees (rev 2 section 7.3, "
+                "A45). Confirm the 135-degree angle manually before relying on "
+                "this beam's stirrups.".format(hook_type_name)
+            )
+        else:
+            lines.append(
+                "- Hook type used: '{}', angle read back and verified = {:.1f} "
+                "degrees, required 135 (rev 2 section 7.3, A45).".format(
+                    hook_type_name, self.selection.stirrup_hook_angle_deg
+                )
+            )
+
+        # Stirrups have no cover field of their own on this tab (#48 collects
+        # dense/normal spacing and closure type only) -- the stirrup rectangle
+        # uses the beam's own SIDE cover, exactly as every other horizontal
+        # cross-section dimension in this report does.
+        cover_mm = geometry["cover_side_mm"]
+
+        try:
+            dense_mm = ui_inputs.parse_positive_float(self.dense_spacing_tb.Text, "Dense spacing")
+            normal_mm = ui_inputs.parse_positive_float(self.normal_spacing_tb.Text, "Normal spacing")
+        except ValueError as ex:
+            lines.append("- Cannot compute stirrup distribution: {}".format(ex))
+            return lines
+        closure_type = ui_inputs.closure_type_from_label(self.closure_type_combo.SelectedItem)
+        if closure_type is None:
+            lines.append("- Cannot compute stirrup distribution: no closure type selected.")
+            return lines
+
+        width_mm, height_mm = centreline_leg_dimensions_mm(
+            geometry["b_mm"], geometry["h_mm"], cover_mm, dia_stirrup_mm
+        )
+        lines.append(
+            "- CENTRELINE rectangle = {:.1f} x {:.1f} mm (b={:.1f}, h={:.1f}, "
+            "Cover={:.1f}, O_stirrup={:.1f}), closure type = {}".format(
+                width_mm, height_mm, geometry["b_mm"], geometry["h_mm"], cover_mm,
+                dia_stirrup_mm, closure_type,
+            )
+        )
+
+        if geometry["l_mm"] is None:
+            lines.append(
+                "- Cannot compute the 3-zone stirrup distribution: rev 2 section "
+                "3.1's zones need BOTH ends supported (a span centreline length), "
+                "and at least one end here is unsupported."
+            )
+            return lines
+
+        face_a_offset_mm = geometry["support_width_start_mm"] / 2.0
+        face_b_offset_mm = geometry["support_width_end_mm"] / 2.0
+        try:
+            zones = stirrup_zones_mm(geometry["l_mm"], face_a_offset_mm, face_b_offset_mm)
+        except ValueError as ex:
+            lines.append("- Cannot compute stirrup zones: {}".format(ex))
+            return lines
+
+        lines.append("- L (c/c) = {:.1f} mm".format(geometry["l_mm"]))
+        zone_specs = [
+            ("zone1", zones.zone1, dense_mm, ZONE_LAYOUT_FLAGS["zone1"]),
+            ("zone2", zones.zone2, normal_mm, ZONE_LAYOUT_FLAGS["zone2"]),
+            ("zone3", zones.zone3, dense_mm, ZONE_LAYOUT_FLAGS["zone3"]),
+        ]
+        beam_total = 0
+        for name, zone, max_spacing_mm, (include_first, include_last) in zone_specs:
+            array_length_mm = zone_array_length_mm(zone)
+            try:
+                result = stirrup_count_and_spacing(array_length_mm, max_spacing_mm, include_first, include_last)
+            except ValueError as ex:
+                lines.append("- {}: {}".format(name, ex))
+                continue
+            beam_total += result.count
+            lines.append(
+                "- {}: [{:.1f}, {:.1f}] mm, array length = {:.1f} mm, achieved "
+                "spacing = {:.1f} mm (max {:.1f} mm), count = {}".format(
+                    name, zone.start, zone.end, array_length_mm, result.spacing_mm,
+                    max_spacing_mm, result.count,
+                )
+            )
+        lines.append("- **Beam total stirrup count = {}**".format(beam_total))
+        return lines
+
+    def _report_crack_bars_lines(self, geometry):
+        """Crack/skin bars section (rev 2 section 5) -- wording ported
+        from "Place Crack Bars.pushbutton". Only ever reached when #50's
+        derivation already confirmed both faces are detailed (A50), so
+        H_avail is never computed from an assumed layer count here.
+        """
+        lines = ["", "Crack/skin bars (rev 2 section 5):"]
+        crack_bar_type = self.selection.crack_bar_type
+        dia_crack_mm = bar_type_diameter_mm(crack_bar_type, internal_to_mm)
+        lines.append("- " + role_grade_report_line(ROLE_CRACK, element_name(crack_bar_type)))
+
+        stirrup_bar_type = self.selection.stirrup_bar_type
+        if stirrup_bar_type is None:
+            lines.append("- Cannot compute crack-bar layout: no stirrup RebarBarType selected.")
+            return lines
+        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+
+        top_dia_mm = bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
+        btm_dia_mm = bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
+
+        try:
+            spacer_dia_mm = ui_inputs.parse_positive_float(self.spacer_dia_tb.Text, "O_spacer")
+            s_max_mm = ui_inputs.parse_positive_float(self.crack_s_max_tb.Text, "s_max")
+        except ValueError as ex:
+            lines.append("- Cannot compute crack-bar layout: {}".format(ex))
+            return lines
+
+        layers_top = ui_inputs.parse_optional_positive_int(self.top_layers_tb.Text, "Number of top layers", max_value=MAX_LAYERS)
+        layers_btm = ui_inputs.parse_optional_positive_int(self.bottom_layers_tb.Text, "Number of bottom layers", max_value=MAX_LAYERS)
+
+        offset_top_mm = layer_offset_mm(geometry["cover_top_mm"], dia_stirrup_mm, top_dia_mm, spacer_dia_mm, layers_top)
+        offset_btm_mm = layer_offset_mm(geometry["cover_btm_mm"], dia_stirrup_mm, btm_dia_mm, spacer_dia_mm, layers_btm)
+        h_avail_mm = available_height_mm(geometry["h_mm"], offset_top_mm, offset_btm_mm)
+        lines.append(
+            "- offset_top (innermost, layer {}) = {:.1f} mm, offset_btm (innermost, "
+            "layer {}) = {:.1f} mm (A26)".format(layers_top, offset_top_mm, layers_btm, offset_btm_mm)
+        )
+        lines.append("- H_avail = {:.1f} mm (section 5.1)".format(h_avail_mm))
+
+        try:
+            plan = crack_layer_plan(h_avail_mm, s_max_mm)
+        except ValueError as ex:
+            lines.append("- Cannot compute crack-bar layer plan: {}".format(ex))
+            return lines
+        lines.append(
+            "- n_gaps = {}, n_crack_layers = {}, actual_spacing = {:.1f} mm "
+            "(max s_max = {:.1f} mm, section 5.2)".format(
+                plan.n_gaps, plan.n_crack_layers, plan.actual_spacing_mm, s_max_mm
+            )
+        )
+        lines.append("- " + spacing_validation_exemption_note())
+
+        if plan.n_crack_layers == 0:
+            lines.append(
+                "- **n_crack_layers = 0**: H_avail <= s_max, a legitimate outcome "
+                "(section 5.2) -- no crack/skin bars would be placed."
+            )
+            return lines
+
+        v_positions_mm = crack_layer_v_positions_mm(
+            geometry["h_mm"], offset_btm_mm, plan.n_crack_layers, plan.actual_spacing_mm
+        )
+        u_left_mm, u_right_mm = crack_bar_u_positions_mm(
+            geometry["b_mm"], geometry["cover_side_mm"], dia_stirrup_mm, dia_crack_mm
+        )
+        lines.append(
+            "- u positions (A24): left = {:.1f} mm, right = {:.1f} mm; v positions: {}".format(
+                u_left_mm, u_right_mm, ", ".join("{:.1f}".format(v) for v in v_positions_mm)
+            )
+        )
+
+        result_start = crack_bar_end_result(
+            geometry["is_supported_start"],
+            support_width_mm=geometry["support_width_start_mm"],
+            support_cover_mm=geometry["support_cover_start_mm"],
+            beam_end_cover_mm=geometry["cover_end_start_mm"],
+        )
+        result_end = crack_bar_end_result(
+            geometry["is_supported_end"],
+            support_width_mm=geometry["support_width_end_mm"],
+            support_cover_mm=geometry["support_cover_end_mm"],
+            beam_end_cover_mm=geometry["cover_end_end_mm"],
+        )
+        for label, result in (("Start end", result_start), ("End end", result_end)):
+            if result.is_supported:
+                lines.append(
+                    "- {}: supported, embedment = {:.1f} mm, straight, no hook "
+                    "(A23, R2)".format(label, result.embedment_mm)
+                )
+            else:
+                lines.append(
+                    "- {}: **UNSUPPORTED** -- straight run terminating {:.1f} mm "
+                    "short of the beam's own end (R2, mirroring section 2.5/A12)".format(
+                        label, result.terminates_short_of_end_mm
+                    )
+                )
+                lines.append(
+                    "- **WARNING ({}):** {}".format(label, free_end_configuration_warning())
+                )
+
+        lines.append("- **Total crack/skin bar count = {}** (2 per layer x {} layers)".format(
+            plan.n_crack_layers * 2, plan.n_crack_layers
+        ))
+        return lines
 
     # ------------------------------------------------------------ picking
     def _reset_beam_state(self, message):
@@ -833,18 +1542,33 @@ class DetailBeamWindow(forms.WPFWindow):
             "the beam-pick flow and the transaction boundary."
         )
 
-    def _missing_bar_type_and_hook_messages(self):
-        """The A42 no-fallback check, read from the ONE attribute per role
-        ``self.selection`` owns -- never a second lookup into the
-        document. Returns the list of ``GuardMessage``s for whichever
-        roles are still unpicked, naming each one.
+    def _missing_bar_type_and_hook_messages(self, review):
+        """The A42 no-fallback check, scoped to what is actually REQUESTED.
+
+        Read from the ONE attribute per role ``self.selection`` owns --
+        never a second lookup into the document. Returns the
+        ``GuardMessage``s for selections that the requested reinforcement
+        genuinely needs and that are still unpicked, naming each one.
+
+        Scoped deliberately: Place's enabled state follows #50's
+        derivation, so a guard that demanded selections for sections
+        nobody requested would enable the button and then refuse it --
+        which is what shipped for exactly one review cycle.
         """
         missing = []
-        for role, attr_name in REQUIRED_BAR_TYPE_ROLES_FOR_PLACE:
-            if getattr(self.selection, attr_name) is None:
-                missing.append(missing_bar_type_selection_message(role))
-        if self.selection.stirrup_hook_type is None:
+        if not review.any_requested:
+            return missing
+
+        # Needed by every section: main-bar layer offsets (4.1) and
+        # crack-bar positions both take the stirrup's diameter.
+        if self.selection.stirrup_bar_type is None:
+            missing.append(missing_bar_type_selection_message(ROLE_STIRRUP))
+
+        # Needed only by stirrups (A45). Main and crack bars use no
+        # RebarHookType at all.
+        if review.stirrups.requested and self.selection.stirrup_hook_type is None:
             missing.append(missing_hook_type_selection_message())
+
         return missing
 
     def on_place_click(self, sender, args):
@@ -874,7 +1598,9 @@ class DetailBeamWindow(forms.WPFWindow):
         # This ticket's structural requirement: Place refuses by name,
         # from the SAME attribute the pickers set -- no second collector
         # call, no defaulting to "first found" (A42).
-        missing = self._missing_bar_type_and_hook_messages()
+        missing = self._missing_bar_type_and_hook_messages(
+            self._compute_review_derivation()
+        )
         if missing:
             forms.alert(
                 "\n\n".join(m.message for m in missing),
