@@ -113,31 +113,35 @@ def corner_bar_u_positions_mm(b_mm, cover_mm, stirrup_dia_mm, bar_dia_mm, bar_co
 # --- R1 (resolved): non-blocking vertical-spacing warning --------------------
 
 
-def spacer_diameter_warning(spacer_dia_mm, bar_dia_mm, d_agg_mm):
+def spacer_diameter_warning(spacer_dia_mm, min_horizontal_mm):
     """R1 -- RESOLVED (non-blocking): warn, never block, when
 
-        O_spacer < max(25, O_bar, 1.33 * D_agg)
+        O_spacer < the governing HORIZONTAL minimum spacing
 
-    Returns a message string naming the spacer diameter and the
-    horizontal minimum it falls below, or None if no warning fires.
-    Callers place the bars regardless of this warning (§4.1, A21: the
-    horizontal min_spacing formula does not itself govern the vertical
-    gap; this is the one check the spec adds on top of that, and it is a
-    warning, not a guard).
+    Returns a message string naming the spacer diameter and the minimum it
+    falls below, or None if no warning fires. Callers place the bars
+    regardless (section 4.1, A21: the horizontal minimum does not itself
+    govern the vertical gap; this is the one check the spec adds on top of
+    that, and it is a warning, not a guard).
 
-    ``d_agg_mm`` is REQUIRED -- rev 2 gives no default for D_agg (§6.2's
-    50 mm fallback only applies when D_agg is undefined, a state this
-    pure function cannot represent with a bare float without inventing a
-    sentinel the spec does not define). Callers with no D_agg input must
-    resolve that at the boundary (e.g. by not calling this function, or
-    by passing whatever value the D_agg-undefined fallback resolves to)
-    rather than this module guessing one.
+    ``min_horizontal_mm`` is the ALREADY-RESOLVED minimum, computed by
+    ``rft.core.spacing.governing_min_spacing_mm`` -- which owns section
+    6.2's two branches (the `max(25, O_bar, 1.33*D_agg)` formula when
+    D_agg is defined, the 50 mm fallback when it is not). This function
+    deliberately does NOT re-derive it from D_agg: doing so duplicated
+    section 6.2's formula in two modules, and left this one unable to
+    represent "D_agg undefined" at all, so the 50 mm fallback could never
+    reach the R1 comparison (issue #17 review).
+
+    Pass the minimum WITHOUT A29's user override applied. R1's own text
+    names the formula, not the engineer's raised floor, so a raised floor
+    must not turn an otherwise acceptable spacer into a warning.
     """
-    min_horizontal_mm = max(25.0, bar_dia_mm, 1.33 * d_agg_mm)
     if spacer_dia_mm < min_horizontal_mm:
         return (
-            "Spacer diameter O_spacer = {:.1f} mm is below the horizontal "
-            "minimum spacing max(25, O_bar, 1.33*D_agg) = {:.1f} mm (rev 2 "
+            "Spacer diameter O_spacer = {:.1f} mm is below the governing "
+            "horizontal minimum spacing of {:.1f} mm (rev 2 section 6.2, "
+            "resolved by rft.core.spacing.governing_min_spacing_mm; "
             "section 4.1, A21; residual question R1, resolved as a "
             "non-blocking warning). Bars are placed regardless.".format(
                 spacer_dia_mm, min_horizontal_mm

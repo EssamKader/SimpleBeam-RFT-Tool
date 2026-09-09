@@ -69,6 +69,12 @@ from rft.core.layout import (
     spacer_diameter_warning,
     spacer_length_mm,
 )
+from rft.core.spacing import (
+    OPTION_SINGLE_ROW,
+    OPTION_STACKED,
+    governing_min_spacing_mm,
+    validate_face_spacing,
+)
 from rft.revit.bar_types import bar_type_diameter_mm, list_bar_types
 from rft.revit.geometry import (
     beam_axis_direction,
@@ -161,7 +167,7 @@ def ask_inputs():
     components = [
         Label("Spacer diameter O_spacer (mm, clear gap between layers):"),
         TextBox("dia_spacer", Text="16"),
-        Label("Max aggregate size D_agg (mm) -- required, no default (rev 2 §8.1 ships it blank):"),
+        Label("Max aggregate size D_agg (mm, optional -- blank = §6.2's 50 mm fallback, A36):"),
         TextBox("d_agg", Text=""),
         Label("Top bar count per layer:"),
         TextBox("count_top", Text="3"),
@@ -171,6 +177,12 @@ def ask_inputs():
         TextBox("layers_top", Text="1"),
         Label("Number of bottom layers (1-{}):".format(MAX_LAYERS)),
         TextBox("layers_btm", Text="1"),
+        Label("§6.3 top face option (1=single wide row, 2=stacked):"),
+        TextBox("option_top", Text="1"),
+        Label("§6.3 bottom face option (1=single wide row, 2=stacked):"),
+        TextBox("option_btm", Text="1"),
+        Label("§6.2 min-spacing override (mm, optional floor -- A29, blank = none):"),
+        TextBox("min_spacing_override", Text=""),
         Label("LD_top multiplier (x diameter, default {}, assumes St 36/52):".format(
             int(DEFAULT_LD_TOP_MULTIPLIER)
         )),
@@ -226,18 +238,13 @@ def main():
     values = ask_inputs()
     dia_spacer_mm = float(values["dia_spacer"]) if values["dia_spacer"] else 16.0
 
-    if not values["d_agg"]:
-        forms.alert(
-            "Max aggregate size D_agg is required to evaluate the R1 "
-            "spacer-diameter warning (rev 2 section 4.1, A21). Rev 2 gives "
-            "no default for D_agg -- entering it is not optional here, "
-            "unlike section 6.2's separate 50 mm horizontal-spacing "
-            "fallback (which this pushbutton does not compute; that is "
-            "S4, issue #17).",
-            title="D_agg required",
-        )
-        script.exit()
-    d_agg_mm = float(values["d_agg"])
+    # D_agg is OPTIONAL and ships blank (A36), precisely so section 6.2's
+    # 50 mm fallback governs until an aggregate size is supplied. Refusing
+    # a blank D_agg would make the tool unable to run in its OWN documented
+    # default configuration, and would leave the fallback branch of
+    # `governing_min_spacing_mm` unreachable from the UI (issue #17
+    # review). `None` selects that branch; a number selects the formula.
+    d_agg_mm = float(values["d_agg"]) if values["d_agg"] else None
 
     count_top = int(values["count_top"])
     count_btm = int(values["count_btm"])
@@ -245,6 +252,11 @@ def main():
     layers_btm = int(values["layers_btm"])
     ld_top_mult = float(values["ld_top_mult"]) if values["ld_top_mult"] else DEFAULT_LD_TOP_MULTIPLIER
     ld_btm_mult = float(values["ld_btm_mult"]) if values["ld_btm_mult"] else DEFAULT_LD_BTM_MULTIPLIER
+    option_top = int(values["option_top"]) if values["option_top"] else OPTION_SINGLE_ROW
+    option_btm = int(values["option_btm"]) if values["option_btm"] else OPTION_SINGLE_ROW
+    min_spacing_override_mm = (
+        float(values["min_spacing_override"]) if values["min_spacing_override"] else None
+    )
 
     # --- A42 (ticket #27, supersedes A35/S7): one explicit RebarBarType
     # selection PER ROLE, no fallback -- top and bottom main bars each get
@@ -358,6 +370,35 @@ def main():
         )
         script.exit()
 
+    # --- §6.2-6.4 spacing validation (A21, A27, A28, A29, A36, A43, A44),
+    # run BEFORE any placement work -- this is a REFUSAL, so nothing may
+    # reach a transaction if it fires (issue #17, S4). Deliberately AFTER
+    # the continuous-run guard: that one rejects the beam's whole
+    # configuration (A41), so reporting a section-level spacing problem
+    # first would send the engineer to fix bar counts for a beam this
+    # tool is going to refuse anyway (issue #17 review). The engineer's typed
+    # bar count applies uniformly to every layer of a face (this pushbutton
+    # has no per-layer count field, only one count per face), so every
+    # layer of a face shares the same `layer_bar_counts` entry; each layer
+    # is still validated independently by `validate_face_spacing` (A44).
+    governing_min_top_mm = governing_min_spacing_mm(dia_top_mm, d_agg_mm, min_spacing_override_mm)
+    governing_min_btm_mm = governing_min_spacing_mm(dia_btm_mm, d_agg_mm, min_spacing_override_mm)
+    top_spacing_report = validate_face_spacing(
+        "Top face", option_top, [count_top] * layers_top, b_mm, cover_side_mm,
+        dia_stirrup_mm, dia_top_mm, governing_min_top_mm,
+    )
+    btm_spacing_report = validate_face_spacing(
+        "Bottom face", option_btm, [count_btm] * layers_btm, b_mm, cover_side_mm,
+        dia_stirrup_mm, dia_btm_mm, governing_min_btm_mm,
+    )
+    spacing_guard_messages = top_spacing_report.guard_messages + btm_spacing_report.guard_messages
+    if spacing_guard_messages:
+        forms.alert(
+            "\n\n".join(g.message for g in spacing_guard_messages),
+            title="Spacing violation -- refused (rev 2 section 6.2-6.4)",
+        )
+        script.exit()
+
     # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end,
     # any support type -- a missing support takes the unsupported path,
     # never a hard stop, so top/bottom anchorage can be computed at both
@@ -431,8 +472,13 @@ def main():
     spacer_length_section_mm = spacer_length_mm(b_mm, cover_side_mm, dia_stirrup_mm)
 
     # --- R1 (resolved, non-blocking): only meaningful with >1 stacked layer --
-    warning_top_spacer = spacer_diameter_warning(dia_spacer_mm, dia_top_mm, d_agg_mm) if layers_top > 1 else None
-    warning_btm_spacer = spacer_diameter_warning(dia_spacer_mm, dia_btm_mm, d_agg_mm) if layers_btm > 1 else None
+    # R1 compares O_spacer against section 6.2's minimum WITHOUT A29's
+    # override applied: R1's own text names the formula, not the engineer's
+    # raised floor, so a raised floor must not manufacture a warning.
+    r1_min_top_mm = governing_min_spacing_mm(dia_top_mm, d_agg_mm)
+    r1_min_btm_mm = governing_min_spacing_mm(dia_btm_mm, d_agg_mm)
+    warning_top_spacer = spacer_diameter_warning(dia_spacer_mm, r1_min_top_mm) if layers_top > 1 else None
+    warning_btm_spacer = spacer_diameter_warning(dia_spacer_mm, r1_min_btm_mm) if layers_btm > 1 else None
 
     # --- rev 2 section 2.2, A7: top/bottom centreline clearance (spec gap
     # when O_TOP > O_BTM -- see this ticket's report) --------------------
@@ -512,6 +558,15 @@ def main():
     ))
 
     output.print_md("#### Top face (O_TOP = {:.1f} mm) -- PLACED (bends DOWNWARD)".format(dia_top_mm))
+    output.print_md("- §6.2 governing min_spacing (top) = {:.1f} mm".format(governing_min_top_mm))
+    for r in top_spacing_report.layer_results:
+        output.print_md(
+            "- §6.3/§6.4 layer {}: {} bars, achieved clear spacing = {}".format(
+                r.layer_index, r.bar_count,
+                "{:.1f} mm (PASS)".format(r.achieved_clear_mm) if r.achieved_clear_mm is not None
+                else "n/a (single bar, no horizontal spacing question)",
+            )
+        )
     for n, offset_mm in enumerate(top_layer_offsets_mm, start=1):
         output.print_md("- layer {}: offset_{} = {:.1f} mm".format(n, n, offset_mm))
     output.print_md("- corner-bar u positions ({} bars): {}".format(
@@ -528,6 +583,15 @@ def main():
         output.print_md("- **R1 warning (top):** {}".format(warning_top_spacer))
 
     output.print_md("#### Bottom face (O_BTM = {:.1f} mm) -- PLACED (bends UPWARD)".format(dia_btm_mm))
+    output.print_md("- §6.2 governing min_spacing (bottom) = {:.1f} mm".format(governing_min_btm_mm))
+    for r in btm_spacing_report.layer_results:
+        output.print_md(
+            "- §6.3/§6.4 layer {}: {} bars, achieved clear spacing = {}".format(
+                r.layer_index, r.bar_count,
+                "{:.1f} mm (PASS)".format(r.achieved_clear_mm) if r.achieved_clear_mm is not None
+                else "n/a (single bar, no horizontal spacing question)",
+            )
+        )
     for n, offset_mm in enumerate(btm_layer_offsets_mm, start=1):
         output.print_md("- layer {}: offset_{} = {:.1f} mm".format(n, n, offset_mm))
     output.print_md("- corner-bar u positions ({} bars): {}".format(

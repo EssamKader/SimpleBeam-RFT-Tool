@@ -163,7 +163,7 @@ def test_corner_bar_positions_rejects_bar_count_below_2():
 
 def test_spacer_warning_fires_when_spacer_below_horizontal_minimum():
     # O_spacer=16 under O_bar=20, D_agg=20 -> min = max(25, 20, 26.6) = 26.6
-    msg = spacer_diameter_warning(spacer_dia_mm=16.0, bar_dia_mm=20.0, d_agg_mm=20.0)
+    msg = spacer_diameter_warning(spacer_dia_mm=16.0, min_horizontal_mm=26.6)
     assert msg is not None
     assert "16.0" in msg
     assert "26.6" in msg or "26.60" in msg
@@ -171,24 +171,38 @@ def test_spacer_warning_fires_when_spacer_below_horizontal_minimum():
 
 def test_spacer_warning_does_not_fire_when_spacer_meets_minimum():
     # O_spacer=30 >= max(25, 20, 1.33*10=13.3) = 25
-    msg = spacer_diameter_warning(spacer_dia_mm=30.0, bar_dia_mm=20.0, d_agg_mm=10.0)
+    msg = spacer_diameter_warning(spacer_dia_mm=30.0, min_horizontal_mm=25.0)
     assert msg is None
 
 
 def test_spacer_warning_exact_minimum_does_not_fire():
     # Exactly at the boundary: spacer == governing minimum -> not "< min".
-    msg = spacer_diameter_warning(spacer_dia_mm=25.0, bar_dia_mm=20.0, d_agg_mm=10.0)
+    msg = spacer_diameter_warning(spacer_dia_mm=25.0, min_horizontal_mm=25.0)
     assert msg is None
 
 
 def test_spacer_warning_governed_by_dagg_when_it_dominates():
     # D_agg large enough that 1.33*D_agg exceeds both 25 and O_bar.
-    msg = spacer_diameter_warning(spacer_dia_mm=16.0, bar_dia_mm=12.0, d_agg_mm=25.0)
+    msg = spacer_diameter_warning(spacer_dia_mm=16.0, min_horizontal_mm=33.25)
     assert msg is not None
-    assert "33.2" in msg or "33.25" in msg
+    assert "33.2" in msg or "33.3" in msg
 
 
 def test_spacer_warning_governed_by_bar_diameter_when_dagg_small():
-    msg = spacer_diameter_warning(spacer_dia_mm=16.0, bar_dia_mm=32.0, d_agg_mm=5.0)
+    msg = spacer_diameter_warning(spacer_dia_mm=16.0, min_horizontal_mm=32.0)
     assert msg is not None
     assert "32.0" in msg
+
+
+def test_spacer_warning_takes_the_resolved_minimum_so_the_fallback_can_reach_it():
+    # The whole point of the signature change (issue #17 review): with
+    # D_agg undefined, section 6.2's minimum is the 50 mm FALLBACK, which
+    # the old `max(25, O_bar, 1.33*D_agg)` re-derivation could not express
+    # -- a 16 mm spacer under a 12 mm bar would have compared against 25.
+    from rft.core.spacing import governing_min_spacing_mm
+
+    fallback_mm = governing_min_spacing_mm(bar_dia_mm=12.0, d_agg_mm=None)
+    assert fallback_mm == 50.0
+    msg = spacer_diameter_warning(spacer_dia_mm=16.0, min_horizontal_mm=fallback_mm)
+    assert msg is not None
+    assert "50.0" in msg

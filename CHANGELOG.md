@@ -127,6 +127,25 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Spacing validation (S4, #17): `lib/rft/core/spacing.py`, wired into
+  `Place Main Bars` before any placement.** Governing minimum per rev 2
+  section 6.2 -- `max(25, O_bar, 1.33*D_agg)` when `D_agg` is defined, the
+  50 mm fallback only when it is not, with A29's optional override acting
+  as a floor that can only raise it. Achieved clear spacing per **A43's
+  corrected datum**, `(b - 2*Cover_side - 2*O_stirrup - n*O_bar)/(n - 1)`;
+  `n = 1` skips the check. Every layer of every face is validated
+  independently and both section 6.3 options **refuse** on a violation
+  (**A44**: the tool never re-splits the bars the engineer stated), naming
+  the governing minimum, the achieved spacing, the maximum bars per layer
+  that would satisfy it and the layer count that would then be needed --
+  or, where A28's absolute 5-layer cap makes that impossible, saying so
+  instead of naming an unreachable count. Section 6.3's option is now a
+  per-face input, cross-checked against the layer count so option 1 with
+  stacked layers is refused rather than silently reinterpreted.
+- **`D_agg` is optional again, as A36 intends.** Blank selects section
+  6.2's 50 mm fallback, which had been unreachable behind a hard stop
+  inherited from S3, and section 6.2's minimum is now evaluated in exactly
+  one place (`governing_min_spacing_mm`) rather than re-derived for R1.
 - **Crack / skin reinforcement (S6, #19): `lib/rft/core/crack_bars.py`
   plus a `Place Crack Bars` pushbutton.** Fires only when `h > 700`
   (rev 2 section 5, strict). `H_avail = h - offset_top - offset_btm`
@@ -232,4 +251,7 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #20 | S7 steel grades and bar type resolution |
 | #27 | A42 per-role bar type selection |
 | #19 | S6 crack / skin reinforcement |
+| #17 | S4 spacing validation and layer decisions |
+| #28 | A43 section 6.4 clear-spacing datum |
+| #29 | A44 engineer-stated bars per layer |
 | #22 | S9 out-of-scope configuration guards |

@@ -220,6 +220,11 @@ def main():
 
     bend_direction = DB.XYZ.BasisZ  # bottom bar bends upward, rev 2 §2.2
 
+    # This pushbutton places exactly ONE bar (n = 1) -- section 6.4's
+    # spacing check is A43-exempt for n = 1 (no horizontal spacing question
+    # for a single bar), so no rft.core.spacing call belongs here (issue
+    # #17, S4).
+
     def do_place():
         a_start_internal = mm_to_internal(anchorage_start.a)
         b_start_internal = mm_to_internal(anchorage_start.b)
