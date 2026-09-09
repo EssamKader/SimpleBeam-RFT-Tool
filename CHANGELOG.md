@@ -2,16 +2,14 @@
 
 All notable changes to the RFT Beam Detailing tool.
 
-**Nothing here is a release yet.** A merge to `master` means the code
-exists; it does **not** mean it is safe to load. Only a tagged commit should
-be loaded into a Revit session, never `master` HEAD.
+A merge to `master` means the code exists; it does **not** mean it is safe
+to load. Only a tagged commit should be loaded into a Revit session, never
+`master` HEAD.
 
-`v0.1.0-rc1` is a **release candidate cut in order to be tested**, not a
-release. It exists because the verification run itself needs something
-stable to install from, and installing the working tree would let an edit to
-`master` silently change what is loaded inside a running Revit session. It
-carries no claim that the buttons work. `v0.1.0` will be cut only if the
-candidate passes on a live host.
+**`v0.1.0` is the first release, and it is verified**: all three pushbuttons
+placed real reinforcement on real beams in a live Revit 2024 session. It got
+there through six candidates — see the release entry for what each one
+found.
 
 ## Delivery model
 
@@ -34,24 +32,53 @@ command: it clones a third-party extension from a git repo URL rather than
 registering a local folder.
 
 Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
-`RFT Beam Detailing.tab/` → `Anchorage.panel/` → `*.pushbutton/script.py`,
+`RFT Beam Detailing.tab/` → `Main Bars.panel/` → `*.pushbutton/script.py`,
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
-## [v0.1.0-rc1] — 2026-09-09
+## [v0.1.0] — 2026-09-09
 
-First tagged commit in the project's history, cut at the `master` commit
-that carries this entry, to give the live verification run a fixed thing to
-install. **Candidate, not a release**
-— see the note at the top of this file. Contents are everything listed under
-Added / Fixed / Decided below, which is the whole of the work to date: six
-detailing subsystems (S1–S7), the out-of-scope guards (S9), the pyRevit
-bundle metadata, and 45 spec amendments. 252 tests pass. Not yet verified:
-see Known risks, first entry.
+**First release, and the first version of this code ever to run.** All three
+pushbuttons — "Place Main Bars", "Place Stirrups", "Place Crack Bars" —
+placed real reinforcement on a real beam in a live Revit 2024 session
+(`RevitAPI 24.3.40.0`), on both a 0° and a 45° 300×900 single-span beam.
+
+Contents: six detailing subsystems (S1–S7), the out-of-scope configuration
+guards (S9), pyRevit bundle metadata and deployment docs, 46 spec
+amendments. 264 tests pass.
+
+### What the six candidates found
+
+Every failure between rc1 and this release was **a wrong API name, never
+wrong detailing arithmetic** — the core maths, unit boundary and guard logic
+worked first time. The candidates, in order:
+
+| Candidate | Reached | Failed on |
+|---|---|---|
+| rc1 | ribbon built, button pressed | `FlexForm` imported from `pyrevit.forms`; it lives in `rpw.ui.forms` |
+| rc2 | imports resolved | no PEP 263 encoding cookie — Python 2 rejects non-ASCII source without one |
+| rc3 | library compiled, picker opened | `.Name` on an `ElementType` is unreachable from IronPython |
+| rc4 | pickers and input form cleared | `GetBoundingBox` is on `GeometryElement`, not `GeometryInstance` |
+| rc5 | **stirrups and crack bars PLACED** | Main Bars formatted a `None` cover with `{:.1f}` |
+| rc6 | **all three place rebar** | — |
+
+**Three of those five were concealed rather than merely missed by the test
+suite**: a fake modelled an API shape that does not exist (`RebarFaceType`
+in #23, `.Name` in rc3, `GetBoundingBox` in rc4), so the suite was green
+against code that could not run. Each fake now mirrors the live surface,
+with a test asserting the absence so that restoring the convenience turns
+the suite red. `tests/test_ironpython_compat.py` additionally guards the
+Python-2 constraints that CPython 3.10 cannot see.
+
+**What is verified**: that the buttons run, place rebar, and read the model.
+**What is not**: that every placed bar is dimensionally correct in every
+configuration. The 0° and 45° beams were detailed successfully; a
+measured check of covers and bar positions against the spec, per
+configuration, has not been done.
 
 ## [Unreleased]
 
-Nothing. `master` and `v0.1.0-rc1` are the same tree.
+Nothing. `master` and `v0.1.0` are the same tree.
 
 ### Added
 
