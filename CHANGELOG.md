@@ -36,6 +36,52 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.2.0-rc2] — 2026-09-10
+
+Fixes the one defect rc1's live test found, on the first click.
+
+**`Pick beam...` could not select anything** until the window was closed
+outright. The window was shown with `ShowDialog()`, and a WPF modal dialog
+disables every other top-level window in the process — Revit's main window
+included — so `Selection.PickObject` could never receive a click in the
+viewport. Nothing past step 1 of the test plan was reachable (#57).
+
+The window is now **modeless**, and every Revit API call it makes is routed
+through `revit.events.execute_in_revit_context`, which runs it inside a real
+API context via an `ExternalEvent`. Both halves are required: a modeless
+window's handlers run *outside* the API context, where `PickObject` and
+`Transaction` raise `InvalidOperationException`.
+
+This follows pyRevit's own precedent rather than an inference — of the
+extensions shipped with pyRevit, exactly one combines a WPF window with
+element picking (`Measure.pushbutton`) and it does precisely these two
+things.
+
+Two properties of that helper shaped the fix:
+
+- It is **asynchronous and returns nothing**, so the dispatched function
+  does the pick *and* updates the window itself.
+- Its handler **swallows exceptions into the pyRevit log**, which would make
+  any error appear as *nothing happening at all*. The wrapper catches
+  everything and puts it on screen instead.
+
+### Consequence for #56
+
+The placement port must use the same routing: a `Transaction` started from a
+modeless window's handler fails exactly the way the pick did.
+
+### Guards added
+
+Three, all mutation-tested by reintroducing the defect and confirming the
+guard fails: the window is never shown modally, the click handlers make no
+direct Revit API call, and the dispatch wrapper cannot stop catching.
+rc1's suite was entirely green while this defect shipped — nothing in it
+modelled how the window is *shown*.
+
+311 tests pass.
+
+---
+
 ## [v0.2.0-rc1] — 2026-09-10
 
 **A test candidate, not a release.** Cut so the new single window can be

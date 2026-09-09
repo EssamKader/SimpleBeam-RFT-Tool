@@ -41,6 +41,13 @@ NON_XAML_SELF_ATTRS = {
     "crack_bar_type", "stirrup_hook_type", "stirrup_hook_angle_deg",
     # #48 (U4) -- ordinary Python state, not an x:Name control.
     "beam_covers_mm",
+    # #57 -- the dispatch guard, plus one INHERITED WPF member:
+    # Window.Dispatcher is a real attribute of the base class, not an
+    # x:Name control, so it belongs here for the same reason ordinary
+    # Python state does. It is currently named only inside a docstring --
+    # this check reads source text, not live attributes, which is the
+    # trade for being able to run it at all without a Revit host.
+    "_api_call_in_flight", "Dispatcher",
 }
 
 # This exclusion list is a maintenance cost, and deliberately so: a new
@@ -262,4 +269,78 @@ def test_beam_scoped_attributes_are_not_double_assigned_in_init():
     assert not duplicated, (
         "assigned twice in __init__, which is what an edit misapplied to "
         "__init__ instead of _reset_beam_state looks like: %s" % duplicated
+    )
+
+
+# --- the window must stay modeless, and handlers must not touch Revit -----
+
+# Revit API calls that fail with InvalidOperationException when made from
+# a modeless window's own event handler, i.e. outside an API context.
+# They are legal ONLY inside a function dispatched through
+# revit.events.execute_in_revit_context.
+API_CALLS_NEEDING_CONTEXT = ("revit.pick_element", "run_in_transaction")
+
+
+def _method_body(name):
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    start = text.index("    def {}(self".format(name))
+    end = text.index("\n    def ", start + 1)
+    return text[start:end]
+
+
+def test_the_window_is_never_shown_modally():
+    """ShowDialog() disables every other top-level window in the process,
+    Revit's main window included, so Selection.PickObject can never
+    receive a click in the viewport.
+
+    This shipped in v0.2.0-rc1 and made "Pick beam..." do nothing at all
+    until the window was closed outright -- the first live test of the
+    single window found it immediately (#57). The suite was fully green
+    at the time: nothing here modelled how the window is SHOWN.
+    """
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    # Matches the CALL (``x.ShowDialog(`` / ``show_dialog(``), not the
+    # bare word -- the comment in script.py explaining why the modal call
+    # is wrong necessarily contains the word itself, and a guard that
+    # cannot coexist with its own explanation is a guard that gets
+    # deleted.
+    modal_calls = re.findall(r"\.ShowDialog\s*\(|show_dialog\s*\(", text)
+    assert not modal_calls, (
+        "the Detail Beam window must be shown modeless (forms.WPFWindow."
+        "show(), modal=False by default). ShowDialog() disables Revit's "
+        "main window, so no pick can ever complete (#57)."
+    )
+    assert "window.show()" in text
+
+
+def test_click_handlers_do_no_revit_work_directly():
+    """The WPF click handlers run OUTSIDE Revit's API context. Anything
+    touching the API has to go through execute_in_revit_context, so the
+    handlers themselves must only dispatch.
+    """
+    for handler in ("on_pick_click", "on_place_click"):
+        body = _method_body(handler)
+        offenders = [call for call in API_CALLS_NEEDING_CONTEXT if call in body]
+        assert not offenders, (
+            "%s calls the Revit API directly. From a modeless window that "
+            "raises InvalidOperationException -- dispatch it through "
+            "_dispatch_to_revit_context instead (#57): %s"
+            % (handler, offenders)
+        )
+
+
+def test_dispatched_work_cannot_fail_silently():
+    """pyRevit's ExternalEvent handler swallows exceptions into its log
+    (_GenericExternalEventHandler.Execute), so an error inside dispatched
+    work would reach the engineer as nothing happening at all. The
+    wrapper must catch and surface it.
+    """
+    body = _method_body("_run_in_revit_context")
+    assert "except Exception" in body, (
+        "_run_in_revit_context must catch everything: pyRevit's "
+        "ExternalEvent handler logs and discards exceptions, which would "
+        "make a real failure invisible (#57)."
+    )
+    assert "forms.alert" in body and "status_tb" in body, (
+        "a caught failure must be shown in the window, not only stored."
     )

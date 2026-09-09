@@ -238,6 +238,8 @@ class DetailBeamWindow(forms.WPFWindow):
         # ``BeamMaterialsSelection``'s docstring. Populated only by the
         # ComboBox handlers wired below, never re-derived elsewhere.
         self.selection = BeamMaterialsSelection()
+        # #57 -- one dispatch at a time; see _dispatch_to_revit_context.
+        self._api_call_in_flight = False
         self._bar_type_options_by_role = {}
         self._hook_type_options = []
 
@@ -581,7 +583,74 @@ class DetailBeamWindow(forms.WPFWindow):
         self.crack_bars_tab.IsEnabled = False
         self.h_avail_tb.Text = ui_inputs.no_beam_picked_h_avail_message()
 
+    # ------------------------------------------- Revit API context (#57)
+    def _dispatch_to_revit_context(self, func, action_label):
+        """Run ``func`` inside a real Revit API context.
+
+        A MODELESS window's event handlers run OUTSIDE Revit's API
+        context, where ``Selection.PickObject`` and ``Transaction`` both
+        raise ``InvalidOperationException``. pyRevit's own modeless tool
+        (``Measure.pushbutton``) solves this with
+        ``revit.events.execute_in_revit_context``, which hands the call to
+        an ``ExternalEvent`` and runs it when Revit is next idle. This is
+        the precedent followed here rather than an inference.
+
+        Two properties of that helper shape this method:
+
+        1. It is ASYNCHRONOUS and returns nothing. Nothing can be handed
+           back to the WPF click handler, so ``func`` must both do the
+           work and update the window itself.
+        2. Its handler SWALLOWS exceptions into pyRevit's log
+           (``events.py``'s ``_GenericExternalEventHandler.Execute``). An
+           error would reach the engineer as NOTHING HAPPENING AT ALL --
+           the worst failure mode there is, and one this project has paid
+           for repeatedly. So ``_run_in_revit_context`` below catches
+           everything and puts it on screen.
+
+        The single shared handler object is also why re-entry is refused:
+        ``execute_in_revit_context`` overwrites one module-level
+        ``_HANDLER.func``, so two dispatches in flight would clobber each
+        other.
+        """
+        if self._api_call_in_flight:
+            return
+        self._api_call_in_flight = True
+        self.status_tb.Text = "{} -- waiting for Revit...".format(action_label)
+        revit.events.execute_in_revit_context(
+            self._run_in_revit_context, func, action_label
+        )
+
+    def _run_in_revit_context(self, func, action_label):
+        """The body actually executed by the ExternalEvent.
+
+        Runs on Revit's UI thread -- the same thread that owns this window
+        -- which is why it may touch the controls directly. If a live host
+        ever proves otherwise, the symptom is an
+        ``InvalidOperationException`` about the calling thread, and the
+        fix is to wrap the UI writes in ``self.Dispatcher.Invoke``.
+        """
+        try:
+            func()
+            if self.status_tb.Text.endswith("waiting for Revit..."):
+                self.status_tb.Text = "ready"
+        except Exception as ex:
+            # NEVER let this reach the ExternalEvent handler, which would
+            # log it and show the engineer nothing at all.
+            message = "{} failed -- {}: {}".format(
+                action_label, type(ex).__name__, ex
+            )
+            self.status_tb.Text = message
+            forms.alert(message, title="{} failed".format(action_label))
+        finally:
+            self._api_call_in_flight = False
+
+    # ------------------------------------------------------------ picking
     def on_pick_click(self, sender, args):
+        """WPF click handler. Does no Revit work itself (#57) -- it only
+        asks for the pick to happen in an API context."""
+        self._dispatch_to_revit_context(self._pick_beam_in_context, "Pick beam")
+
+    def _pick_beam_in_context(self):
         # Re-picking must repopulate everything and re-run support
         # detection from scratch (A35) -- so the state is reset FIRST,
         # regardless of how far the previous pick got.
@@ -761,6 +830,8 @@ class DetailBeamWindow(forms.WPFWindow):
         return missing
 
     def on_place_click(self, sender, args):
+        """WPF click handler. Input validation is pure Python and stays
+        here; everything that touches Revit is dispatched (#57)."""
         if self.beam is None:
             forms.alert(
                 "Pick a beam on the Beam & Materials tab before pressing "
@@ -793,6 +864,12 @@ class DetailBeamWindow(forms.WPFWindow):
             )
             return
 
+        # A Transaction started from a modeless window's handler fails
+        # exactly the way the pick did, so it goes through the same
+        # dispatch (#57). #56's placement port inherits this.
+        self._dispatch_to_revit_context(self._place_in_context, "Place")
+
+    def _place_in_context(self):
         try:
             run_in_transaction(doc, "RFT Detail Beam", self._do_place)
         except NotImplementedError as ex:
@@ -823,9 +900,22 @@ class DetailBeamWindow(forms.WPFWindow):
         self.place_result_tb.Text = "Placed successfully."
 
 
+# The window must outlive main(). A modeless window whose only reference is
+# a local goes out of scope the moment the script returns; the same
+# module-level-handle pattern is what pyRevit's own modeless Measure tool
+# uses.
+window = None
+
+
 def main():
+    global window
     window = DetailBeamWindow()
-    window.ShowDialog()
+    # MODELESS (issue #57). ShowDialog() disables every other top-level
+    # window in the process -- Revit's main window included -- so
+    # Selection.PickObject could never receive a click in the viewport and
+    # "Pick beam..." did nothing until the window was closed outright.
+    # forms.WPFWindow.show() defaults to modal=False and calls Show().
+    window.show()
 
 
 if __name__ == "__main__":
