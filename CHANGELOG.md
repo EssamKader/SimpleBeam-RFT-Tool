@@ -127,6 +127,18 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Stirrup hook family and angle (#25, A45): a two-part guard, verified
+  against a live Revit 2024 host.** The required angle is **135 deg**
+  (A45, superseding A33's 180), and the constraint that actually matters
+  is the hook FAMILY: `REBAR_HOOK_STYLE` must be 1 (Stirrup/Tie), because
+  `RebarStyle.StirrupTie` rejects a Standard-family hook with an opaque
+  `InternalException` whatever its angle. The two checks are reported
+  separately, so a Standard hook at exactly 135 deg is diagnosed as a
+  family problem rather than an angle problem. The picker filters to
+  family 1, and a model with no such hook refuses with the fix named
+  instead of falling back to the first hook found. Names are never used:
+  the live model holds a hook called `Stirrup/Tie - 45` whose family is
+  Standard.
 - **Spacing validation (S4, #17): `lib/rft/core/spacing.py`, wired into
   `Place Main Bars` before any placement.** Governing minimum per rev 2
   section 6.2 -- `max(25, O_bar, 1.33*D_agg)` when `D_agg` is defined, the
@@ -252,6 +264,9 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #27 | A42 per-role bar type selection |
 | #19 | S6 crack / skin reinforcement |
 | #17 | S4 spacing validation and layer decisions |
+| #25 | Stirrup hook family and angle (A45) |
+| #30 | Cover reads via real face references |
+| #31 | A45 stirrup hook angle decision |
 | #28 | A43 section 6.4 clear-spacing datum |
 | #29 | A44 engineer-stated bars per layer |
 | #22 | S9 out-of-scope configuration guards |

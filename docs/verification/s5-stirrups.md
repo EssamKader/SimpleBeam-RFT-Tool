@@ -1,5 +1,18 @@
 # S5 Mock-Object Verification Write-up
 
+> **CORRECTED BY ISSUE #25 / A45 (2026-09-09).** Every claim below about a
+> **180°** stirrup hook, and every open question about whether
+> `RebarStyle.StirrupTie` permits one, has since been settled against a
+> live host — and the required angle has changed to **135°**. The real
+> constraint turned out to be the hook's **family**
+> (`REBAR_HOOK_STYLE`, `0 = Standard`, `1 = Stirrup/Tie`), not its angle:
+> a `StirrupTie` rebar rejects a Standard-family hook whatever the angle,
+> and accepts a Stirrup/Tie-family hook at 135° *or* 180°. The
+> `SHAPE UNVERIFIED` notes on `hook_angle_deg` are retired. See
+> `docs/verification/issue-25-stirrup-hook-family-and-angle.md`; this
+> document is kept as the record of what was known at the time.
+
+
 Ticket [#18](https://github.com/EssamKader/rft-beam-detailing/issues/18) —
 stirrup leg geometry, closure types 1/2/4, and the 3-zone distribution.
 

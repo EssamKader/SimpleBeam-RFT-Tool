@@ -1,8 +1,10 @@
 """Pure-core tests for rft.core.grades (S7, issue #20; reworked for A42,
-ticket #27): the role -> grade assignment (rev 2 section 1.1, A34), the
-per-role picker label, the no-fallback explicit-selection guards, the
-180-degree hook-angle check (issue #25), and the stirrup/high-tensile
-grade-conflict guard A42 introduces.
+ticket #27; reworked again for A45, issue #25): the role -> grade
+assignment (rev 2 section 1.1, A34), the per-role picker label, the
+no-fallback explicit-selection guards, the two-part 135-degree /
+Stirrup-Tie-family stirrup hook guard (rev 2 section 7.3, A45, supersedes
+A33; issue #25), and the stirrup/high-tensile grade-conflict guard A42
+introduces.
 """
 
 import pytest
@@ -10,6 +12,8 @@ import pytest
 from rft.core.grades import (
     GRADE_HIGH_TENSILE,
     GRADE_MILD,
+    HOOK_STYLE_STANDARD,
+    HOOK_STYLE_STIRRUP_TIE,
     ROLE_BOTTOM_MAIN,
     ROLE_CRACK,
     ROLE_GRADE,
@@ -19,11 +23,14 @@ from rft.core.grades import (
     bar_type_for_role,
     grade_for_role,
     hook_angle_guard_message,
+    hook_style_guard_message,
     missing_bar_type_selection_message,
     missing_hook_type_selection_message,
+    no_usable_hook_type_message,
     role_grade_report_line,
     role_picker_label,
     stirrup_grade_conflict_message,
+    unreadable_hook_style_message,
 )
 
 
@@ -137,22 +144,35 @@ def test_missing_bar_type_selection_message_for_stirrups_names_mild_grade():
     assert GRADE_MILD in guard.message
 
 
-def test_missing_hook_type_selection_message_names_180_degrees_and_issue_25():
+def test_missing_hook_type_selection_message_names_135_degrees_and_issue_25():
     guard = missing_hook_type_selection_message()
-    assert "180" in guard.message
+    assert "135" in guard.message
     assert "7.3" in guard.spec_section
 
 
-# --- hook angle guard (issue #25) ----------------------------------------
+def test_no_usable_hook_type_message_names_the_fix_not_a_fallback():
+    """rft.core.grades.no_usable_hook_type_message -- fires when filtering
+    to the Stirrup/Tie family (A45) leaves nothing to pick from. Must name
+    the fix (create/duplicate a 135-degree Stirrup/Tie hook), not suggest
+    falling back to any hook found -- that is the exact defect issue #25/
+    S7 (#20) removed."""
+    guard = no_usable_hook_type_message()
+    assert "Stirrup/Tie" in guard.message
+    assert "135" in guard.message
+    assert "Create" in guard.message or "create" in guard.message
+    assert "first" not in guard.message.lower()
 
 
-def test_hook_angle_guard_passes_at_exactly_180():
-    assert hook_angle_guard_message(180.0) is None
+# --- hook angle guard (issue #25, A45 -- 135 degrees, not 180) -----------
+
+
+def test_hook_angle_guard_passes_at_exactly_135():
+    assert hook_angle_guard_message(135.0) is None
 
 
 def test_hook_angle_guard_passes_within_tolerance():
-    assert hook_angle_guard_message(180.9) is None
-    assert hook_angle_guard_message(179.1) is None
+    assert hook_angle_guard_message(135.9) is None
+    assert hook_angle_guard_message(134.1) is None
 
 
 def test_hook_angle_guard_blocks_a_90_degree_hook():
@@ -160,15 +180,47 @@ def test_hook_angle_guard_blocks_a_90_degree_hook():
     assert guard is not None
     assert "90.0" in guard.message
     assert "Standard-90" in guard.message
-    assert "180" in guard.message
+    assert "135" in guard.message
 
 
-def test_hook_angle_guard_blocks_a_135_degree_hook():
-    """A33 supersedes the 135-degree ACI recommendation the §7 research
-    considered (deformed-bar assumption) -- confirms 135 is rejected here
-    too, not only a wildly wrong angle."""
-    guard = hook_angle_guard_message(135.0)
+def test_hook_angle_guard_blocks_a_180_degree_hook():
+    """A45 supersedes A33's 180-degree requirement -- confirms a
+    180-degree hook is now rejected by the ANGLE check (its family is
+    checked separately, see hook_style_guard_message tests below)."""
+    guard = hook_angle_guard_message(180.0, hook_type_name="Standard-180")
     assert guard is not None
+    assert "135" in guard.message
+
+
+# --- hook style/family guard (issue #25/#31, A45) -------------------------
+# Kept as a SEPARATE check from the angle on purpose: a Standard-family
+# hook set to exactly 135 degrees must fail HERE, not be reported as an
+# angle problem it does not have.
+
+
+def test_hook_style_guard_passes_for_stirrup_tie_family():
+    assert hook_style_guard_message(HOOK_STYLE_STIRRUP_TIE) is None
+
+
+def test_hook_style_guard_blocks_standard_family_and_says_angle_does_not_save_it():
+    guard = hook_style_guard_message(HOOK_STYLE_STANDARD, hook_type_name="Standard - 135 deg.")
+    assert guard is not None
+    assert "Standard - 135 deg." in guard.message
+    assert "does not save it" in guard.message
+    assert "InternalException" in guard.message
+
+
+def test_hook_style_guard_blocks_an_unrecognised_style_value():
+    guard = hook_style_guard_message(7)
+    assert guard is not None
+
+
+def test_unreadable_hook_style_message_refuses_rather_than_proceeding():
+    guard = unreadable_hook_style_message(hook_type_name="Mystery Hook")
+    assert guard is not None
+    assert "Mystery Hook" in guard.message
+    assert "REBAR_HOOK_STYLE" in guard.message
+    assert "could not be read back" in guard.message
 
 
 # --- stirrup_grade_conflict_message (A42, ticket #27) --------------------

@@ -60,11 +60,15 @@ Currently ``SHAPE UNVERIFIED``:
   accessor name for a `CreateFromCurves`-built stirrup (vs. a distinct
   accessor for shape-driven vs. free-form rebar).
 - ``RebarStyle.StirrupTie`` and ``RebarHookType`` (angle/multiplier-bearing
-  hook object passed to `Rebar.CreateFromCurves`). Whether
-  `RebarStyle.StirrupTie` actually permits a 180-degree hook is the
-  load-bearing unverified item named in CONTEXT.md -- this fake does not
-  and cannot validate that; it only lets `rft.revit.stirrups` import and
-  run under CPython.
+  hook object passed to `Rebar.CreateFromCurves`). This fake does not and
+  cannot validate real `Rebar.CreateFromCurves` acceptance behaviour; it
+  only lets `rft.revit.stirrups` import and run under CPython. CONTEXT.md's
+  original "does StirrupTie permit 180 deg" load-bearing unknown was
+  resolved live for issue #25/#31 (A45): it is the hook's
+  `REBAR_HOOK_STYLE` FAMILY that StirrupTie constrains (must be 1 =
+  Stirrup/Tie), not any particular angle -- confirmed against Revit 2024.
+  See the `REBAR_HOOK_STYLE` entry below for what that live probe did and
+  did not confirm about the exact read-back accessor.
 - ``Wall.Width`` (issue #15, S2) -- assumed to be a read-only property
   returning the wall's total thickness directly in internal units (feet).
   Not confirmed against a live host; this fake only carries whatever a
@@ -88,10 +92,21 @@ Currently ``SHAPE UNVERIFIED``:
   live host which one every downstream mm computation should read. See
   ``rft/revit/bar_types.py``.
 - ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)
-  .AsDouble()`` (issue #25) -- assumed to return the hook's own angle in
-  RADIANS. Whether this parameter exists on ``RebarHookType`` at all, and
-  whether it is the right member for the catalog hook's own fixed angle,
-  is unconfirmed against a live host. See ``rft/revit/bar_types.py``.
+  .AsDouble()`` (issue #25) -- VERIFIED LIVE against Revit 2024
+  (``RevitAPI 24.3.40.0``, issue #25/#31 probe): returns the hook's own
+  angle in RADIANS, exactly as assumed. Not a new SHAPE UNVERIFIED item
+  any more; kept in this list only as a record of what was confirmed and
+  when. See ``rft/revit/bar_types.py``.
+- ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_STYLE)
+  .AsInteger()`` (issue #25/#31, A45) -- the live probe VERIFIED that
+  `BuiltInParameter.REBAR_HOOK_STYLE` distinguishes Standard (0) from
+  Stirrup/Tie (1) hook families and that `RebarStyle.StirrupTie` rejects a
+  Standard-family hook with an opaque `InternalException` regardless of
+  angle. What the probe did NOT independently confirm is this exact
+  accessor call (`get_Parameter(...).AsInteger()`) -- the 0/1 meaning was
+  read from the Revit UI/API browser, not by re-probing this specific
+  method. Still SHAPE UNVERIFIED on that narrower point. See
+  ``rft/revit/bar_types.py``.
 - ``pyrevit.forms.SelectFromList.show(items, multiselect=False,
   name_attr=..., title=..., button_name=...)`` (issue #20, S7) -- the
   explicit dropdown/list picker used to select bar and hook types. This is
@@ -327,23 +342,50 @@ class FakeRebarHookAngleParameter(object):
         return math.radians(self._angle_deg)
 
 
+class FakeRebarHookStyleParameter(object):
+    """SHAPE UNVERIFIED -- stand-in for the ``Parameter`` object
+    ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_STYLE)`` is
+    assumed to return (issue #25/#31, A45). The 0/1 MEANING (0 = Standard,
+    1 = Stirrup/Tie) is VERIFIED LIVE; this specific accessor
+    (``AsInteger()``) is not independently re-confirmed. Carries whatever
+    style int a test assigns."""
+
+    def __init__(self, style):
+        self._style = style
+
+    def AsInteger(self):
+        return self._style
+
+
 class FakeRebarHookType(object):
-    """SHAPE UNVERIFIED -- stand-in for `Autodesk.Revit.DB.Structure.
-    RebarHookType`. Real hook angle/multiplier live on the Revit-side
-    object; this fake only carries whatever a test assigns for assertion
-    purposes and proves nothing about whether StirrupTie permits 180 deg.
+    """SHAPE UNVERIFIED (narrowed by issue #25/#31's live probe -- see
+    module header) -- stand-in for `Autodesk.Revit.DB.Structure.
+    RebarHookType`. Real hook angle/style live on the Revit-side object;
+    this fake only carries whatever a test assigns for assertion purposes.
 
     ``angle_deg=None`` simulates a hook type whose angle CANNOT be read
-    back at all (``get_Parameter`` returns None) -- issue #25's "unreadable"
-    case, distinct from an angle that reads back and fails the 180-degree
-    check.
+    back at all (``get_Parameter`` returns None for
+    ``REBAR_HOOK_ANGLE``) -- issue #25's "unreadable angle" case, distinct
+    from an angle that reads back and fails the 135-degree check.
+
+    ``style=None`` (the default) simulates a hook type whose
+    ``REBAR_HOOK_STYLE`` CANNOT be read back at all -- issue #25/#31's
+    "unreadable style" case, which must REFUSE rather than proceed (see
+    ``rft.core.grades.unreadable_hook_style_message``). Pass ``style=1``
+    (``HOOK_STYLE_STIRRUP_TIE``) or ``style=0`` (``HOOK_STYLE_STANDARD``)
+    to simulate a readable family.
     """
 
-    def __init__(self, angle_deg=None, name=None):
+    def __init__(self, angle_deg=None, name=None, style=None):
         self.angle_deg = angle_deg
         self.Name = name
+        self.style = style
 
-    def get_Parameter(self, _built_in_parameter):
+    def get_Parameter(self, built_in_parameter):
+        if built_in_parameter is FakeBuiltInParameter.REBAR_HOOK_STYLE:
+            if self.style is None:
+                return None
+            return FakeRebarHookStyleParameter(self.style)
         if self.angle_deg is None:
             return None
         return FakeRebarHookAngleParameter(self.angle_deg)
@@ -398,10 +440,13 @@ class FakeRebarBarType(object):
 
 
 class FakeBuiltInParameter(object):
-    """SHAPE UNVERIFIED -- ``REBAR_HOOK_ANGLE`` (issue #25). See
+    """SHAPE UNVERIFIED -- ``REBAR_HOOK_ANGLE`` (issue #25) is verified
+    live to return radians; ``REBAR_HOOK_STYLE`` (issue #25/#31, A45) is
+    verified live for its 0/1 meaning but not this exact accessor. See
     tests/fake_revit_api.py header."""
 
     REBAR_HOOK_ANGLE = object()
+    REBAR_HOOK_STYLE = object()
 
 
 class FakeOptions(object):

@@ -17,10 +17,13 @@ from rft.core.grades import (
     ROLE_STIRRUP,
     bar_type_for_role,
     hook_angle_guard_message,
+    hook_style_guard_message,
     missing_bar_type_selection_message,
     missing_hook_type_selection_message,
+    no_usable_hook_type_message,
     role_grade_report_line,
     role_picker_label,
+    unreadable_hook_style_message,
 )
 from rft.core.guards import no_support_detected_message, stirrup_type3_guard_message
 from rft.core.stirrups import (
@@ -45,8 +48,9 @@ from rft.revit.geometry import (
 from rft.revit.bar_types import (
     bar_type_diameter_mm,
     hook_angle_deg,
+    hook_style,
     list_bar_types,
-    list_hook_types,
+    list_stirrup_hook_types,
 )
 from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, validate_rebar_host
@@ -83,30 +87,32 @@ def select_bar_type_for_role(document, role):
     )
 
 
-def select_hook_type(document):
-    """Explicit selection of the 180-degree RebarHookType used for
-    stirrups (rev 2 section 7.3, A33; issue #25) -- NO fallback to "the
-    first one found". Returns None if the document has no RebarHookType at
-    all, or if the engineer cancels the picker.
+def select_hook_type(candidates):
+    """Explicit selection of the Stirrup/Tie-family, 135-degree
+    RebarHookType used for stirrups (rev 2 section 7.3, A45, supersedes
+    A33; issue #25) -- NO fallback to "the first one found". ``candidates``
+    is the ALREADY-FILTERED list (``list_stirrup_hook_types``, style == 1)
+    the caller in ``main`` obtained; this function only drives the picker
+    UI, and so takes no ``document`` -- it has nothing left to collect. Returns None if the engineer cancels the picker -- an empty
+    ``candidates`` list is the caller's problem to refuse
+    (``no_usable_hook_type_message``), not this function's.
 
-    Whether the picked type's angle is ACTUALLY 180 degrees is checked
-    separately, after selection, in ``main`` -- via ``hook_angle_deg``,
-    which may itself come back unable to confirm the angle at all (issue
-    #25's second open question). This function only removes the
-    name-matching fallback; it does not and cannot validate the angle.
+    Whether the picked type's style is ACTUALLY Stirrup/Tie and its angle
+    is ACTUALLY 135 degrees are both checked separately, after selection,
+    in ``main`` -- the filter here is a convenience, not a guarantee (the
+    read could still fail, or disagree with the read taken here). This
+    function only removes the name-matching fallback; it does not and
+    cannot validate either property.
 
     SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
     docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
     signature.
     """
-    hook_types = list_hook_types(document)
-    if not hook_types:
-        return None
     return forms.SelectFromList.show(
-        hook_types,
+        candidates,
         multiselect=False,
         name_attr="Name",
-        title="Select 180-degree RebarHookType (stirrups)",
+        title="Select Stirrup/Tie RebarHookType at 135 degrees (stirrups)",
         button_name="Select",
     )
 
@@ -158,7 +164,20 @@ def main():
         script.exit()
     bar_type = bar_type_for_role(ROLE_STIRRUP, stirrup_bar_type_selected)
 
-    hook_type = select_hook_type(doc)
+    # --- issue #25/#31 (A45): filter the picker to the Stirrup/Tie family
+    # (REBAR_HOOK_STYLE == 1) BEFORE showing it. Offering a hook guaranteed
+    # to throw RebarStyle.StirrupTie's opaque InternalException (every
+    # stock 180-degree/Standard-family hook) is a UI that invites the
+    # error. Filtering can legitimately return nothing -- a model with only
+    # Standard hooks has no valid stirrup hook at all -- which refuses with
+    # a message naming the fix, never a fallback to "the first hook found"
+    # (the exact defect S7/#20 removed).
+    stirrup_hook_candidates = list_stirrup_hook_types(doc)
+    if not stirrup_hook_candidates:
+        forms.alert(no_usable_hook_type_message().message, title="No usable stirrup hook type")
+        script.exit()
+
+    hook_type = select_hook_type(stirrup_hook_candidates)
     if hook_type is None:
         forms.alert(missing_hook_type_selection_message().message, title="RebarHookType selection required")
         script.exit()
@@ -178,18 +197,43 @@ def main():
     # rested on an unconfirmed `Rebar.GetHostId()` and failed OPEN, so it
     # would have looked like a guard while protecting nothing.
 
-    # --- issue #25: read back the selected hook's own angle where
-    # possible and BLOCK if it is not 180 degrees. If it cannot be read
-    # back at all, this does NOT block -- it is reported as UNVERIFIED in
-    # the output below (issue #25 stays open for a live-host session
-    # rather than being falsely closed by an assumption).
     hook_type_name = getattr(hook_type, "Name", None)
+
+    # --- issue #25/#31 (A45): the two-part guard, kept SEPARATE and
+    # separately reported. Both halves are required, but a combined
+    # message would misdiagnose a Standard-family hook set to exactly 135
+    # degrees as an ANGLE problem, which it does not have -- the family is
+    # the half that actually prevents Revit's opaque
+    # "InternalException: An internal error has occurred.".
+    #
+    # 1) STYLE (family) -- checked first, since a wrong family is what
+    #    actually crashes Rebar.CreateFromCurves regardless of angle. An
+    #    unreadable style REFUSES outright (unlike an unreadable angle,
+    #    below) -- there is nothing safe to "proceed hopefully" toward when
+    #    a wrong family throws that opaque exception.
+    hook_style_value = hook_style(hook_type)
+    if hook_style_value is None:
+        forms.alert(
+            unreadable_hook_style_message(hook_type_name or "").message,
+            title="Stirrup hook family could not be verified",
+        )
+        script.exit()
+    hook_style_violation = hook_style_guard_message(hook_style_value, hook_type_name=hook_type_name or "")
+    if hook_style_violation:
+        forms.alert(hook_style_violation.message, title="Stirrup hook family is not Stirrup/Tie")
+        script.exit()
+
+    # 2) ANGLE -- read back the selected hook's own angle where possible
+    # and BLOCK if it is not 135 degrees (A45, supersedes A33's 180). If it
+    # cannot be read back at all, this does NOT block -- it is reported as
+    # UNVERIFIED in the output below (issue #25 stays open for a live-host
+    # session rather than being falsely closed by an assumption).
     hook_angle_deg_value = hook_angle_deg(hook_type)
     hook_angle_unverified = hook_angle_deg_value is None
     if not hook_angle_unverified:
         hook_angle_violation = hook_angle_guard_message(hook_angle_deg_value, hook_type_name=hook_type_name or "")
         if hook_angle_violation:
-            forms.alert(hook_angle_violation.message, title="Stirrup hook angle is not 180 degrees")
+            forms.alert(hook_angle_violation.message, title="Stirrup hook angle is not 135 degrees")
             script.exit()
 
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)

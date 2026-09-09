@@ -951,6 +951,81 @@ def test_hook_angle_deg_returns_none_when_get_parameter_is_missing_entirely():
     assert hook_angle_deg(_NoParameterHookType()) is None
 
 
+# --- Issue #25/#31 (A45): hook style/family read-back and picker filter --
+
+
+def test_hook_style_reads_back_stirrup_tie_family():
+    from rft.revit.bar_types import hook_style
+
+    hook_type = FakeRebarHookType(angle_deg=135, name="Stirrup/Tie - 135 deg.", style=1)
+    assert hook_style(hook_type) == 1
+
+
+def test_hook_style_reads_back_standard_family():
+    from rft.revit.bar_types import hook_style
+
+    hook_type = FakeRebarHookType(angle_deg=180, name="Standard - 180 deg.", style=0)
+    assert hook_style(hook_type) == 0
+
+
+def test_hook_style_returns_none_when_unreadable():
+    from rft.revit.bar_types import hook_style
+
+    hook_type = FakeRebarHookType(angle_deg=135, name="Unknown family", style=None)
+    assert hook_style(hook_type) is None
+
+
+def test_hook_style_returns_none_when_get_parameter_is_missing_entirely():
+    from rft.revit.bar_types import hook_style
+
+    class _NoParameterHookType(object):
+        pass
+
+    assert hook_style(_NoParameterHookType()) is None
+
+
+def test_list_stirrup_hook_types_filters_to_style_1_only(monkeypatch):
+    """Offering a hook guaranteed to throw an opaque InternalException
+    (every stock 180-degree/Standard-family hook) is a UI that invites the
+    error (A45 live-host finding, issue #25/#31) -- the picker must only
+    ever be shown Stirrup/Tie-family (style 1) candidates."""
+    from fake_revit_api import FakeFilteredElementCollector
+    from rft.revit.bar_types import list_stirrup_hook_types
+
+    standard_180 = FakeRebarHookType(angle_deg=180, name="Standard - 180 deg.", style=0)
+    stirrup_tie_135 = FakeRebarHookType(angle_deg=135, name="Stirrup/Tie - 135 deg.", style=1)
+    stirrup_tie_90 = FakeRebarHookType(angle_deg=90, name="Stirrup/Tie - 90 deg.", style=1)
+    unreadable_style = FakeRebarHookType(angle_deg=135, name="Unknown", style=None)
+    monkeypatch.setattr(
+        FakeFilteredElementCollector,
+        "_ITEMS",
+        [standard_180, stirrup_tie_135, stirrup_tie_90, unreadable_style],
+    )
+
+    result = list_stirrup_hook_types(None)
+
+    assert standard_180 not in result
+    assert unreadable_style not in result
+    assert stirrup_tie_135 in result
+    assert stirrup_tie_90 in result
+    assert len(result) == 2
+
+
+def test_list_stirrup_hook_types_returns_empty_list_when_none_match(monkeypatch):
+    """A model containing only Standard-family hooks has no usable stirrup
+    hook at all (A45) -- the filter must legitimately return an empty
+    list, which the caller (rft.core.grades.no_usable_hook_type_message)
+    turns into an actionable refusal, never a fallback to the unfiltered
+    list."""
+    from fake_revit_api import FakeFilteredElementCollector
+    from rft.revit.bar_types import list_stirrup_hook_types
+
+    standard_180 = FakeRebarHookType(angle_deg=180, name="Standard - 180 deg.", style=0)
+    monkeypatch.setattr(FakeFilteredElementCollector, "_ITEMS", [standard_180])
+
+    assert list_stirrup_hook_types(None) == []
+
+
 # --- Issue #27 (A42): per-role RebarBarType resolution and reworked -------
 # --- Place Main Bars' diameter source, verified at the adapter boundary --
 
