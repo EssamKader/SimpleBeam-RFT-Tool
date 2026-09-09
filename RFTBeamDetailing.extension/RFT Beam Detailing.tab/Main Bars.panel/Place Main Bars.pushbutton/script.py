@@ -38,7 +38,12 @@ SCOPE BOUNDARIES (see this ticket's report for the full rationale):
 """
 
 from pyrevit import forms, revit, script
-from pyrevit.forms import Button, FlexForm, Label, TextBox
+# FlexForm and its components live in rpw.ui.forms (RevitPythonWrapper, bundled
+# with pyRevit), NOT in pyrevit.forms -- verified against pyRevit 6.1.0.26047,
+# whose pyrevit.forms exposes SelectFromList/CommandSwitchWindow/alert/ask_for_*
+# and nothing named Button. Importing these from pyrevit.forms raised
+# ImportError on every button at load time.
+from rpw.ui.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.anchorage import (
     DEFAULT_LD_BTM_MULTIPLIER,
