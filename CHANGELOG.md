@@ -36,6 +36,70 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.2.0-rc4] — 2026-09-10
+
+**The single window places reinforcement.** First candidate where Place is
+not a stub.
+
+### What to test, and what "correct" looks like
+
+Detail a beam with the window, then detail an identical beam with the three
+old buttons, and **compare**. That comparison is the whole point of keeping
+them, and it is the acceptance criterion on #55: it shows the rework changed
+the *interface* and not the *detailing*.
+
+Place now reports a **count** — "Placed 47 rebar elements." — which you can
+check against the Review report's own totals and against what the old
+buttons produce for the same inputs.
+
+### Only what is REQUESTED gets placed (#50)
+
+Review states, in words, what will and will not be placed and why. A section
+is requested when the selection only it needs has been made: a bar type plus
+a non-blank count for a face, the hook for stirrups, and for crack bars a
+crack bar type, `h > 700`, **and both faces detailed** (A50).
+
+### One computation behind both the report and the steel (#56)
+
+New module `rft/core/plan.py`. The report and the placer were going to need
+the same numbers — layer offsets and positions, anchorage per end, stirrup
+zones, the crack-bar plan. Computing them twice is how a report and the bars
+it describes drift apart: both would keep calling the correct functions and
+could still be handed different arguments. The report now *formats* the plan
+the placer *executes*.
+
+The detailing arithmetic itself is unchanged — every position still comes
+from the `rft.core` functions `v0.1.0` was verified with. The two
+live-verified geometry facts are carried across verbatim: the
+centroid-to-location-curve offset at every stirrup station, and the
+support-face reference point per end.
+
+### A51 — anchorage with only one face detailed
+
+§2.1's top anchorage needs the *bottom* bar's diameter. Since the faces are
+independent, that face may not be placed — so the diameter is taken from the
+**selected** bottom bar type, placed or not. With no bottom type selected at
+all the end is **refused by name**, inside the transaction, so nothing is
+left half detailed.
+
+### Everything is all-or-nothing
+
+One transaction (A46). Any refusal — A51's, an invalid input, a Revit error
+— rolls back every section, including ones already placed in the same run.
+
+### Tests
+
+20 new tests on the plan module, the one whose output becomes steel.
+Cross-checked against the 300×900 verification beam **and** against
+`docs/ui/sketch-notation.svg`, drawn by hand from the spec weeks earlier:
+both give `offset₁ = 43 mm` and four crack layers at 162.8 mm.
+
+359 tests pass. **None of that is evidence that a single bar is correctly
+placed.** No rebar has been placed by this code — that needs a live host, and
+it is the only thing that matters next.
+
+---
+
 ## [v0.2.0-rc3] — 2026-09-10
 
 Two things the second live test found: the pick still did nothing, and the
