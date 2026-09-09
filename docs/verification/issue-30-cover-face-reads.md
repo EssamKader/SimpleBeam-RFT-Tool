@@ -173,6 +173,57 @@ unsupported, so at most one of `end_start_mm`/`end_end_mm` is ever
 populated there; this is not a discrepancy in correctness, only in how
 defensively each pushbutton names its variables.
 
+## Verified live on a ROTATED beam (2026-09-09)
+
+The original probe ran on a beam aligned to **+X**, which is exactly the
+case a world-axis shortcut survives. The project owner then modelled a
+second, identical 300 x 900 beam at **45 deg in plan**, and both were
+re-probed against the live host. This closes the one assumption this
+ticket could not measure at the time.
+
+```
+beam 1944835  plan angle = 0 deg    axis=(1, 0, 0)       u_dir=(0, 1, 0)
+  WORLD AABB in plan: dx=9000.0  dy=300.0
+  TOP       n=(0, 0, 1)        world-axis check would also classify
+  SIDE(-u)  n=(0, -1, 0)       world-axis check would also classify
+  BOTTOM    n=(0, 0, -1)       world-axis check would also classify
+  SIDE(+u)  n=(0, 1, 0)        world-axis check would also classify
+  TRUE section from faces: b=300 mm, h=900 mm    (oblique faces: 0)
+
+beam 1945073  plan angle = 45 deg   axis=(0.7071, 0.7071, 0)  u_dir=(-0.7071, 0.7071, 0)
+  WORLD AABB in plan: dx=6576.1  dy=6576.1
+  TOP       n=(0, 0, 1)        world-axis check would also classify
+  SIDE(-u)  n=(0.707, -0.707, 0)   WORLD-AXIS CHECK WOULD FAIL/REFUSE
+  BOTTOM    n=(0, 0, -1)       world-axis check would also classify
+  SIDE(+u)  n=(-0.707, 0.707, 0)   WORLD-AXIS CHECK WOULD FAIL/REFUSE
+  TRUE section from faces: b=300 mm, h=900 mm    (oblique faces: 0)
+```
+
+**Face classification: correct on both, and the rotated case proves the
+frame-relative check is doing real work.** Both SIDE normals on the 45 deg
+beam are `(+/-0.707, +/-0.707, 0)` — neither a world X nor a world Y
+vector. A `abs(n.X) > tol` / `abs(n.Y) > tol` check refuses or misclassifies
+both of them, while the beam-frame check resolves them exactly, with **zero
+oblique faces** and the true `b = 300`, `h = 900` recovered from face areas
+on both beams. The 45 deg unit test that shipped with this ticket asserted
+this; the live host now measures it.
+
+**S5's world-AABB defect, quantified.** On the 0 deg beam the world
+bounding box gives `dy = 300.0` — which *is* `b`, by coincidence of
+alignment, so reading it would have looked correct forever. On the 45 deg
+beam the same read gives `dx = dy = 6576.1 mm`, where the true `b` is
+**300 mm**: a factor of nearly 22. That value is exactly
+`(9000 + 300) / sqrt(2)`, the `(b + L)` diagonal signature #18's review
+predicted analytically. The prediction and the measurement agree to a
+tenth of a millimetre.
+
+**The z-datum, on both beams.** Location curve at `z = -3800 mm`, section
+centroid at `z = -4250 mm`, so `dv = -450 mm = -h/2` — the beam hangs
+entirely below its location curve under Revit's default justification.
+Identical on both beams, so it is a convention rather than a property of
+one element. Centring the cage on the location curve would place it half
+outside the beam, which is precisely what S5's review found and fixed.
+
 ## Review finding (fixed before commit)
 
 **The support-cover face was selected correctly and documented backwards.**
