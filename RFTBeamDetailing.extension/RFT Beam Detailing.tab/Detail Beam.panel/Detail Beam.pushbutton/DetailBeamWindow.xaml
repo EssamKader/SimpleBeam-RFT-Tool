@@ -6,11 +6,13 @@
         WindowStartupLocation="CenterScreen"
         SizeToContent="Manual">
 
-    <!-- Shell only (issue #46, U2): one WPFWindow, one TabControl, proven
-         by the #42 spike, no Expander fallback needed. Tab CONTENTS are
-         #47 (Beam & Materials), #48 (Main bars / Stirrups / Crack bars) and
-         #50 (Review): every non-"Beam & Materials" tab below is a
-         clearly-labelled placeholder, not a stub pretending to be finished. -->
+    <!-- Shell (issue #46, U2): one WPFWindow, one TabControl, proven by the
+         #42 spike, no Expander fallback needed. "Beam & Materials" is now
+         #47 (U3)'s scope: geometry, four per-face covers, support
+         detection, and one RebarBarType picker per role plus the stirrup
+         RebarHookType. #48 (Main bars / Stirrups / Crack bars) and #50
+         (Review) remain clearly-labelled placeholders, not stubs
+         pretending to be finished. -->
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -59,15 +61,61 @@
                                 <TextBox x:Name="h_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
                             </Grid>
 
-                            <TextBlock Text="Covers (read from the beam's own faces)" FontWeight="Bold" Margin="0,0,0,4"/>
-                            <TextBlock x:Name="covers_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
+                            <!-- #47 (U3): the four covers, each face SEPARATELY, never
+                                 concatenated into one TextBlock (this ticket's explicit
+                                 requirement), and the two end covers are "n/a (supported)"
+                                 rather than a number whenever that end is supported (never
+                                 format None numerically: the rc5 crash). Side cover is a
+                                 fifth read this module also exposes (section 6/7's horizontal
+                                 dimensions) and is shown alongside for the same reason. -->
+                            <TextBlock Text="Covers (read from the beam's own faces, per face)" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="cover_top_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <TextBlock x:Name="cover_bottom_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <TextBlock x:Name="cover_side_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <TextBlock x:Name="cover_start_end_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <TextBlock x:Name="cover_end_end_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
                             <TextBlock Text="Support detection, per end" FontWeight="Bold" Margin="0,0,0,4"/>
                             <TextBlock x:Name="start_support_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="end_support_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
-                            <TextBlock TextWrapping="Wrap" FontStyle="Italic"
-                                       Text="Bar-type pickers, the stirrup hook and the four per-face covers as individually editable fields are #47's scope (Beam &amp; Materials tab), not this shell."/>
+                            <!-- #47 (U3): one RebarBarType picker per bar role, plus the
+                                 stirrup RebarHookType. Each ComboBox's ItemsSource is a
+                                 plain list of label strings set from script.py (never the
+                                 raw (label, element) tuples, which renders the Python repr
+                                 in the dropdown), and NO item is pre-selected: A42 forbids a
+                                 "first found" fallback, so the dropdown opens genuinely
+                                 empty until the engineer picks. The label TextBlock above
+                                 each combo carries A34's required grade
+                                 (role_picker_label), set from script.py so the wording can
+                                 never drift from rft.core.grades' own mapping. -->
+                            <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" FontWeight="Bold" Margin="0,0,0,4"/>
+
+                            <TextBlock x:Name="top_main_bar_label_tb" TextWrapping="Wrap" Margin="0,4,0,2" Text=""/>
+                            <ComboBox x:Name="top_main_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
+
+                            <TextBlock x:Name="bottom_main_bar_label_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <ComboBox x:Name="bottom_main_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
+
+                            <TextBlock x:Name="stirrup_bar_label_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <ComboBox x:Name="stirrup_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
+
+                            <TextBlock x:Name="crack_bar_label_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <ComboBox x:Name="crack_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
+
+                            <!-- The hook has no A34 grade of its own (rev 2 section 7.3,
+                                 A45): the label here is fixed, unlike the bar-role labels
+                                 above which are set from rft.core.grades. The candidate list
+                                 is already filtered to the Stirrup/Tie family
+                                 (REBAR_HOOK_STYLE == 1) before this combo is even populated;
+                                 the selection is re-checked again after picking (A45).
+                                 stirrup_hook_status_tb reports if NO usable hook exists in
+                                 the document at all. -->
+                            <TextBlock Text="Stirrup hook (RebarHookType, Stirrup/Tie family, 135 deg +/- 1 deg -- A45):"
+                                       TextWrapping="Wrap" Margin="0,0,0,2"/>
+                            <ComboBox x:Name="stirrup_hook_combo" Margin="0,0,0,2" HorizontalAlignment="Left" MinWidth="360"/>
+                            <TextBlock x:Name="stirrup_hook_status_tb" Foreground="#FFB00000"
+                                       TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
