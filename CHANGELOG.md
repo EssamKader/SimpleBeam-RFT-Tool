@@ -40,8 +40,9 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 
 ## [v0.1.0-rc1] — 2026-09-09
 
-First tagged commit in the project's history, cut from `baf9b7e` to give the
-live verification run a fixed thing to install. **Candidate, not a release**
+First tagged commit in the project's history, cut at the `master` commit
+that carries this entry, to give the live verification run a fixed thing to
+install. **Candidate, not a release**
 — see the note at the top of this file. Contents are everything listed under
 Added / Fixed / Decided below, which is the whole of the work to date: six
 detailing subsystems (S1–S7), the out-of-scope guards (S9), the pyRevit
