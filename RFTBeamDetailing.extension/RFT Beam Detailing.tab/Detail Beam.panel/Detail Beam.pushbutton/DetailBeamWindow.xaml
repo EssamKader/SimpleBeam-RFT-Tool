@@ -7,12 +7,12 @@
         SizeToContent="Manual">
 
     <!-- Shell (issue #46, U2): one WPFWindow, one TabControl, proven by the
-         #42 spike, no Expander fallback needed. "Beam & Materials" is now
-         #47 (U3)'s scope: geometry, four per-face covers, support
-         detection, and one RebarBarType picker per role plus the stirrup
-         RebarHookType. #48 (Main bars / Stirrups / Crack bars) and #50
-         (Review) remain clearly-labelled placeholders, not stubs
-         pretending to be finished. -->
+ #42 spike, no Expander fallback needed. "Beam & Materials" is now
+ #47 (U3)'s scope: geometry, four per-face covers, support
+ detection, and one RebarBarType picker per role plus the stirrup
+ RebarHookType. #48 (Main bars / Stirrups / Crack bars) and #50
+ (Review) remain clearly-labelled placeholders, not stubs
+ pretending to be finished. -->
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -30,7 +30,7 @@
                     <StackPanel Margin="10">
 
                         <!-- A35: the pick control sits at the TOP of this tab,
-                             and is the only thing enabled before a beam is picked. -->
+ and is the only thing enabled before a beam is picked. -->
                         <Button x:Name="pick_btn" Content="Pick beam..."
                                 HorizontalAlignment="Left" Padding="14,4" Margin="0,0,0,6"/>
                         <TextBlock x:Name="beam_status_tb" FontWeight="Bold"
@@ -39,8 +39,8 @@
                                    TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
                         <!-- Disabled as a whole group until a successful pick;
-                             re-picking repopulates every field below and
-                             re-runs support detection (A35). -->
+ re-picking repopulates every field below and
+ re-runs support detection (A35). -->
                         <StackPanel x:Name="geometry_panel" IsEnabled="False">
                             <TextBlock Text="Geometry (read from the model)" FontWeight="Bold" Margin="0,4,0,4"/>
                             <Grid Margin="0,0,0,10">
@@ -62,12 +62,12 @@
                             </Grid>
 
                             <!-- #47 (U3): the four covers, each face SEPARATELY, never
-                                 concatenated into one TextBlock (this ticket's explicit
-                                 requirement), and the two end covers are "n/a (supported)"
-                                 rather than a number whenever that end is supported (never
-                                 format None numerically: the rc5 crash). Side cover is a
-                                 fifth read this module also exposes (section 6/7's horizontal
-                                 dimensions) and is shown alongside for the same reason. -->
+ concatenated into one TextBlock (this ticket's explicit
+ requirement), and the two end covers are "n/a (supported)"
+ rather than a number whenever that end is supported (never
+ format None numerically: the rc5 crash). Side cover is a
+ fifth read this module also exposes (section 6/7's horizontal
+ dimensions) and is shown alongside for the same reason. -->
                             <TextBlock Text="Covers (read from the beam's own faces, per face)" FontWeight="Bold" Margin="0,0,0,4"/>
                             <TextBlock x:Name="cover_top_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_bottom_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
@@ -80,15 +80,15 @@
                             <TextBlock x:Name="end_support_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
                             <!-- #47 (U3): one RebarBarType picker per bar role, plus the
-                                 stirrup RebarHookType. Each ComboBox's ItemsSource is a
-                                 plain list of label strings set from script.py (never the
-                                 raw (label, element) tuples, which renders the Python repr
-                                 in the dropdown), and NO item is pre-selected: A42 forbids a
-                                 "first found" fallback, so the dropdown opens genuinely
-                                 empty until the engineer picks. The label TextBlock above
-                                 each combo carries A34's required grade
-                                 (role_picker_label), set from script.py so the wording can
-                                 never drift from rft.core.grades' own mapping. -->
+ stirrup RebarHookType. Each ComboBox's ItemsSource is a
+ plain list of label strings set from script.py (never the
+ raw (label, element) tuples, which renders the Python repr
+ in the dropdown), and NO item is pre-selected: A42 forbids a
+ "first found" fallback, so the dropdown opens genuinely
+ empty until the engineer picks. The label TextBlock above
+ each combo carries A34's required grade
+ (role_picker_label), set from script.py so the wording can
+ never drift from rft.core.grades' own mapping. -->
                             <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" FontWeight="Bold" Margin="0,0,0,4"/>
 
                             <TextBlock x:Name="top_main_bar_label_tb" TextWrapping="Wrap" Margin="0,4,0,2" Text=""/>
@@ -104,13 +104,13 @@
                             <ComboBox x:Name="crack_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
 
                             <!-- The hook has no A34 grade of its own (rev 2 section 7.3,
-                                 A45): the label here is fixed, unlike the bar-role labels
-                                 above which are set from rft.core.grades. The candidate list
-                                 is already filtered to the Stirrup/Tie family
-                                 (REBAR_HOOK_STYLE == 1) before this combo is even populated;
-                                 the selection is re-checked again after picking (A45).
-                                 stirrup_hook_status_tb reports if NO usable hook exists in
-                                 the document at all. -->
+ A45): the label here is fixed, unlike the bar-role labels
+ above which are set from rft.core.grades. The candidate list
+ is already filtered to the Stirrup/Tie family
+ (REBAR_HOOK_STYLE == 1) before this combo is even populated;
+ the selection is re-checked again after picking (A45).
+ stirrup_hook_status_tb reports if NO usable hook exists in
+ the document at all. -->
                             <TextBlock Text="Stirrup hook (RebarHookType, Stirrup/Tie family, 135 deg +/- 1 deg -- A45):"
                                        TextWrapping="Wrap" Margin="0,0,0,2"/>
                             <ComboBox x:Name="stirrup_hook_combo" Margin="0,0,0,2" HorizontalAlignment="Left" MinWidth="360"/>
@@ -121,27 +121,142 @@
                 </ScrollViewer>
             </TabItem>
 
+            <!-- #48 (U4): main-bar counts and layer counts SHIP BLANK (A44;
+ #50/U6's derivation rule depends on this) - everything else
+ on this tab ships with its A36 v1 default already in the
+ TextBox. Nothing here is placed by this ticket; the Review
+ tab's derivation and the placement port are #50/#56. -->
             <TabItem Header="Main bars">
-                <StackPanel Margin="10">
-                    <TextBlock FontWeight="Bold" Text="Main bars -- placeholder"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
-                               Text="Bar counts and layers per face, LD multipliers, the section 6.3 layer option, D_agg and O_spacer are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
-                </StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="10">
+                        <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Text="Bar counts and layer counts per face SHIP BLANK (A44) -- the engineer states them, and the tool never re-splits what is entered. Everything else here ships with its rev 2 section 8.1/A36 default."/>
+
+                        <TextBlock Text="Top face" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="180"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Top bar count per layer"/>
+                            <TextBlock x:Name="top_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of top layers"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Top face option (1/2, section 6.3)"/>
+                            <TextBox x:Name="top_bar_count_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="top_layers_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="top_face_option_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text="1"/>
+                        </Grid>
+
+                        <TextBlock Text="Bottom face" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="180"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bottom bar count per layer"/>
+                            <TextBlock x:Name="bottom_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of bottom layers"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Bottom face option (1/2, section 6.3)"/>
+                            <TextBox x:Name="bottom_bar_count_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="bottom_layers_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="bottom_face_option_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text="1"/>
+                        </Grid>
+
+                        <TextBlock Text="Layout and anchorage" FontWeight="Bold" Margin="0,4,0,4"/>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="260"/>
+                                <ColumnDefinition Width="200"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Spacer diameter O_spacer (mm, clear gap)"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Max aggregate size D_agg (mm, blank = 50 mm fallback)"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Section 6.2 min-spacing override (mm, blank = none)"/>
+                            <TextBox x:Name="spacer_dia_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text="16"/>
+                            <TextBox x:Name="d_agg_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="min_spacing_override_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text=""/>
+                        </Grid>
+
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="260"/>
+                                <ColumnDefinition Width="260"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="ld_top_label_tb" Grid.Row="0" Grid.Column="0" Text="Top bar development length multiplier (LD_top)"/>
+                            <TextBlock x:Name="ld_btm_label_tb" Grid.Row="0" Grid.Column="1" Text="Bottom bar development length multiplier (LD_btm)"/>
+                            <TextBox x:Name="ld_top_mult_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="ld_btm_mult_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text=""/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
 
+            <!-- #48 (U4): closure type is a ComboBox of 1/2/4 ONLY - type 3
+ is never an item to select, not merely refused after typing
+ (A31, R6, this ticket's fourth specified constraint). The
+ note TextBlock below shows
+ rft.core.guards.stirrup_type3_guard_message()'s OWN text,
+ set from script.py, so the wording cannot drift from the
+ guard it quotes. -->
             <TabItem Header="Stirrups">
                 <StackPanel Margin="10">
-                    <TextBlock FontWeight="Bold" Text="Stirrups -- placeholder"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
-                               Text="Dense/normal spacing and closure type (1, 2, 4 -- type 3 stays parked, A31) are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
+                    <TextBlock Text="Spacing" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="220"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Dense spacing, supports (mm)"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Normal spacing, midspan (mm)"/>
+                        <TextBox x:Name="dense_spacing_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text="150"/>
+                        <TextBox x:Name="normal_spacing_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text="200"/>
+                    </Grid>
+
+                    <TextBlock Text="Closure type (section 7.2)" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="closure_type_combo" HorizontalAlignment="Left" MinWidth="120" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="closure_type3_note_tb" Foreground="#FFB05A00"
+                               TextWrapping="Wrap" Margin="0,0,0,0" Text=""/>
                 </StackPanel>
             </TabItem>
 
-            <TabItem Header="Crack bars">
+            <!-- #48 (U4): the whole tab is enabled only when
+ crack_bars.crack_reinforcement_triggered(h) - strict
+ h &gt; 700 (section 5) - re-evaluated on every edit of h,
+ never only at pick time (h is editable, #47/A35). H_avail is
+ DISPLAYED, never entered (this ticket's third specified
+ constraint): the sharpest gap in v0.1.0 was
+ "Place Crack Bars" re-asking for layer counts and reading
+ nothing back, so H_avail could silently disagree with the
+ as-built beam. -->
+            <TabItem x:Name="crack_bars_tab" Header="Crack bars" IsEnabled="False">
                 <StackPanel Margin="10">
-                    <TextBlock FontWeight="Bold" Text="Crack bars -- placeholder"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
-                               Text="O_crack, s_max and the h &gt; 700 trigger (section 5) are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
+                               Text="Enabled only when h &gt; 700 mm (rev 2 section 5, strict). O_crack comes from the crack RebarBarType picker on Beam &amp; Materials -- no diameter is re-asked here."/>
+                    <TextBlock x:Name="crack_s_max_label_tb" Text="Max spacing between crack-bar layers, s_max (mm)"/>
+                    <TextBox x:Name="crack_s_max_tb" HorizontalAlignment="Left" MinWidth="120" Margin="0,2,0,10" Text=""/>
+
+                    <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" FontWeight="Bold" Margin="0,0,0,2"/>
+                    <TextBlock x:Name="h_avail_tb" TextWrapping="Wrap" Text=""/>
                 </StackPanel>
             </TabItem>
 

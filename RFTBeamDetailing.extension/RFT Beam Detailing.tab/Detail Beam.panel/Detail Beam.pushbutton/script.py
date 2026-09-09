@@ -60,6 +60,14 @@ place a stirrup ``RebarBarType`` can come from.
 
 from pyrevit import forms, revit, script
 
+from rft.core.anchorage import DEFAULT_LD_BTM_MULTIPLIER, DEFAULT_LD_TOP_MULTIPLIER
+from rft.core.crack_bars import (
+    DEFAULT_S_MAX_MM,
+    available_height_mm,
+    crack_reinforcement_triggered,
+)
+from rft.core.guards import stirrup_type3_guard_message
+from rft.core.layout import MAX_LAYERS, layer_offset_mm
 from rft.core.grades import (
     ROLE_BOTTOM_MAIN,
     ROLE_CRACK,
@@ -74,6 +82,7 @@ from rft.core.grades import (
     unreadable_hook_style_message,
 )
 from rft.revit.bar_types import (
+    bar_type_diameter_mm,
     bar_type_options,
     element_name,
     hook_angle_deg,
@@ -98,6 +107,7 @@ from rft.revit.host import (
 )
 from rft.revit.placement import run_in_transaction
 from rft.revit.units import internal_to_mm, mm_to_internal
+from rft.ui import inputs as ui_inputs
 
 output = script.get_output()
 doc = revit.doc
@@ -205,8 +215,10 @@ def _parse_positive_float(text, field_label):
 
 
 class DetailBeamWindow(forms.WPFWindow):
-    """The five-tab shell (issue #46). Only "Beam & Materials" does any
-    real work in this ticket; the other four tabs are placeholders."""
+    """The five-tab shell (issue #46). "Beam & Materials" (#47) and the
+    Main bars/Stirrups/Crack bars tabs (#48, this ticket) collect inputs;
+    Review's derivation and report (#50) and placement itself (#56) are
+    not built yet -- this ticket places nothing, per its own scope."""
 
     def __init__(self):
         # Bare filename: WPFWindow._determine_xaml resolves it against
@@ -216,13 +228,12 @@ class DetailBeamWindow(forms.WPFWindow):
 
         self.beam = None
         self.host_data = None
-        # Cleared with the rest of the beam-scoped state. It is written
-        # only at Place today, so nothing reads a stale value YET -- but
-        # #49's live sketch and #50's report both read the geometry, and
-        # leaving the previous beam's L/b/h here would hand them the
-        # WRONG beam's dimensions with nothing to indicate it.
         self.geometry_mm = None
-        self.geometry_mm = None
+        # #48 -- the beam's own top/bottom cover, kept as NUMBERS (not just
+        # formatted into a TextBlock) so H_avail (rev 2 section 5.1, A26)
+        # can be computed live without a second read of the model. Cleared
+        # with the rest of the beam-scoped state.
+        self.beam_covers_mm = None
         # #47 (U3) -- the one attribute per role this window owns; see
         # ``BeamMaterialsSelection``'s docstring. Populated only by the
         # ComboBox handlers wired below, never re-derived elsewhere.
@@ -239,6 +250,21 @@ class DetailBeamWindow(forms.WPFWindow):
         # doing so on every pick would be the exact second-collector-call
         # this ticket's structural requirement forbids.
         self._populate_material_pickers()
+
+        # #48 (U4) -- defaults for Main bars/Stirrups/Crack bars are set
+        # HERE, from the imported core constants, rather than trusted to
+        # whatever literal happens to sit in the XAML -- so the shipped
+        # default provably traces to ``rft.core`` and cannot drift from it
+        # (A36; this ticket's instruction that defaults come from the core
+        # constants, never retyped literals).
+        self._populate_reinforcement_tab_defaults()
+
+        # h is editable (#47, A35) and the crack tab's enabled state must
+        # track it live (this ticket's brief), not only at pick time.
+        self.h_tb.TextChanged += self._on_h_or_layout_changed
+        self.top_layers_tb.TextChanged += self._on_h_or_layout_changed
+        self.bottom_layers_tb.TextChanged += self._on_h_or_layout_changed
+        self.spacer_dia_tb.TextChanged += self._on_h_or_layout_changed
 
         self._reset_beam_state(message="No beam picked yet.")
 
@@ -286,12 +312,17 @@ class DetailBeamWindow(forms.WPFWindow):
         label = sender.SelectedItem
         if label is None:
             setattr(self.selection, attr_name, None)
-            return
-        options = self._bar_type_options_by_role[role]
-        # dict(options) recovers the element the label was built from --
-        # the same pattern the three pre-#46 pushbuttons already use for
-        # ``forms.SelectFromList``, applied to a ComboBox instead.
-        setattr(self.selection, attr_name, dict(options)[label])
+        else:
+            options = self._bar_type_options_by_role[role]
+            # dict(options) recovers the element the label was built from --
+            # the same pattern the three pre-#46 pushbuttons already use for
+            # ``forms.SelectFromList``, applied to a ComboBox instead.
+            setattr(self.selection, attr_name, dict(options)[label])
+        # #48 -- H_avail (rev 2 section 5.1, A26) needs the top/bottom main
+        # bar diameters AND the stirrup diameter, all of which live only on
+        # ``self.selection``, so every role's picker re-triggers the same
+        # refresh rather than only the two main-bar roles.
+        self._refresh_h_avail()
 
     def _on_hook_type_selected(self, sender, args):
         """Rev 2 section 7.3 (A45): the selection is re-checked AFTER
@@ -361,6 +392,144 @@ class DetailBeamWindow(forms.WPFWindow):
         self.selection.stirrup_hook_angle_deg = angle_deg
         self.selection.stirrup_hook_type = hook_type
 
+    # --------------------------------------------------- U4 reinforcement tabs
+    def _populate_reinforcement_tab_defaults(self):
+        """Main bars/Stirrups/Crack bars tab defaults (issue #48, U4), set
+        from the imported ``rft.core`` constants rather than left to
+        whatever literal the XAML happens to carry -- ``DEFAULT_LD_TOP_
+        MULTIPLIER``/``DEFAULT_LD_BTM_MULTIPLIER`` (``rft.core.anchorage``),
+        ``DEFAULT_S_MAX_MM`` (``rft.core.crack_bars``) and ``MAX_LAYERS``
+        (``rft.core.layout``). Bar counts and layer counts are NOT touched
+        here -- they ship blank (A44) and this method must never fill them.
+        """
+        self.ld_top_mult_tb.Text = "{:.0f}".format(DEFAULT_LD_TOP_MULTIPLIER)
+        self.ld_btm_mult_tb.Text = "{:.0f}".format(DEFAULT_LD_BTM_MULTIPLIER)
+        self.ld_top_label_tb.Text = (
+            "Top bar development length multiplier (LD_top, default {:.0f})".format(
+                DEFAULT_LD_TOP_MULTIPLIER
+            )
+        )
+        self.ld_btm_label_tb.Text = (
+            "Bottom bar development length multiplier (LD_btm, default {:.0f})".format(
+                DEFAULT_LD_BTM_MULTIPLIER
+            )
+        )
+        self.top_layers_label_tb.Text = "Number of top layers (1-{})".format(MAX_LAYERS)
+        self.bottom_layers_label_tb.Text = "Number of bottom layers (1-{})".format(MAX_LAYERS)
+
+        self.crack_s_max_tb.Text = "{:.0f}".format(DEFAULT_S_MAX_MM)
+        self.crack_s_max_label_tb.Text = (
+            "Max spacing between crack-bar layers, s_max (mm, default {:.0f})".format(
+                DEFAULT_S_MAX_MM
+            )
+        )
+
+        # #48 (U4) constraint 4: the ComboBox offers ONLY 1, 2, 4 -- type 3
+        # is never an item to select, not merely refused after typing (A31,
+        # R6). Default selection is stirrup type 1 (A36).
+        self.closure_type_combo.ItemsSource = [
+            str(n) for n in ui_inputs.ALLOWED_CLOSURE_TYPES
+        ]
+        self.closure_type_combo.SelectedIndex = 0
+        # rft.core.guards.stirrup_type3_guard_message()'s OWN text, quoted
+        # verbatim (this ticket's constraint 4) so the note on this tab
+        # cannot drift from the guard it describes.
+        self.closure_type3_note_tb.Text = stirrup_type3_guard_message().message
+
+        self.crack_bars_tab.IsEnabled = False
+        self.h_avail_tb.Text = ui_inputs.no_beam_picked_h_avail_message()
+
+    def _on_h_or_layout_changed(self, sender, args):
+        """Re-evaluates the crack tab's enabled state and H_avail on every
+        edit of `h` or of the main-bar layer counts/spacer diameter (this
+        ticket's brief: `h` is editable, #47/A35, and the crack tab's
+        enabled state must track it live, not only at pick time).
+
+        A half-typed or empty `h` must never crash the window: unparseable
+        text returns ``None`` from ``ui_inputs.try_parse_float`` and this
+        handler leaves the crack tab's CURRENT enabled state untouched --
+        it does not force it to disabled.
+        """
+        h_mm = ui_inputs.try_parse_float(self.h_tb.Text)
+        if h_mm is not None:
+            self.crack_bars_tab.IsEnabled = crack_reinforcement_triggered(h_mm)
+        self._refresh_h_avail()
+
+    def _refresh_h_avail(self):
+        """H_avail (rev 2 section 5.1, A26), DISPLAYED, never entered (this
+        ticket's constraint 3) -- measured to the INNERMOST main-bar layer,
+        read from the Main bars tab and ``self.selection``'s bar types
+        rather than re-asked. Shows a sentence naming what is missing
+        instead of a number or a formatted ``None`` (this ticket's brief;
+        the exact gap this ticket closes in v0.1.0's "Place Crack Bars").
+
+        No detailing arithmetic lives in ``rft.ui.inputs`` -- it only
+        reports which input is missing; the actual offsets and H_avail
+        itself are computed here, by calling ``rft.core.layout.
+        layer_offset_mm`` / ``rft.core.crack_bars.available_height_mm``
+        directly, per A48 (the renderer/adapter owns no detailing
+        arithmetic of its own).
+        """
+        if self.beam is None or self.beam_covers_mm is None:
+            self.h_avail_tb.Text = ui_inputs.no_beam_picked_h_avail_message()
+            return
+
+        h_mm = ui_inputs.try_parse_float(self.h_tb.Text)
+        top_bar_dia_mm = (
+            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
+            if self.selection.top_main_bar_type is not None else None
+        )
+        btm_bar_dia_mm = (
+            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
+            if self.selection.bottom_main_bar_type is not None else None
+        )
+        stirrup_dia_mm = (
+            bar_type_diameter_mm(self.selection.stirrup_bar_type, internal_to_mm)
+            if self.selection.stirrup_bar_type is not None else None
+        )
+        try:
+            layers_top = ui_inputs.parse_optional_positive_int(
+                self.top_layers_tb.Text, "Number of top layers", max_value=MAX_LAYERS
+            )
+            layers_btm = ui_inputs.parse_optional_positive_int(
+                self.bottom_layers_tb.Text, "Number of bottom layers", max_value=MAX_LAYERS
+            )
+        except ValueError:
+            # An in-progress/invalid layer-count edit is reported the same
+            # way as a MISSING one -- H_avail cannot be computed from it
+            # either way, and this handler must never raise (it runs on
+            # every keystroke).
+            layers_top = None
+            layers_btm = None
+
+        missing = ui_inputs.missing_h_avail_inputs(
+            h_mm, top_bar_dia_mm, btm_bar_dia_mm, stirrup_dia_mm, layers_top, layers_btm
+        )
+        if missing:
+            self.h_avail_tb.Text = ui_inputs.h_avail_missing_message(missing)
+            return
+
+        try:
+            spacer_dia_mm = ui_inputs.parse_positive_float(
+                self.spacer_dia_tb.Text, "O_spacer"
+            )
+        except ValueError:
+            self.h_avail_tb.Text = ui_inputs.h_avail_missing_message(
+                ["a valid spacer diameter (O_spacer)"]
+            )
+            return
+
+        offset_top_mm = layer_offset_mm(
+            self.beam_covers_mm.top_mm, stirrup_dia_mm, top_bar_dia_mm, spacer_dia_mm, layers_top
+        )
+        offset_btm_mm = layer_offset_mm(
+            self.beam_covers_mm.bottom_mm, stirrup_dia_mm, btm_bar_dia_mm, spacer_dia_mm, layers_btm
+        )
+        h_avail_mm = available_height_mm(h_mm, offset_top_mm, offset_btm_mm)
+        self.h_avail_tb.Text = "H_avail = {:.1f} mm (rev 2 section 5.1, A26).".format(
+            h_avail_mm
+        )
+
     # ------------------------------------------------------------ picking
     def _reset_beam_state(self, message):
         """A35: every geometry/support field is disabled until a beam is
@@ -376,7 +545,20 @@ class DetailBeamWindow(forms.WPFWindow):
         """
         self.beam = None
         self.host_data = None
-        self.geometry_panel.IsEnabled = False
+        self.beam_covers_mm = None
+        # Beam-scoped, so cleared here with everything else. Written only
+        # at Place today, so nothing reads a stale value YET -- but #49's
+        # live sketch and #50's report both read the geometry, and leaving
+        # the previous beam's L/b/h here would hand them the WRONG beam's
+        # dimensions with nothing to indicate it.
+        #
+        # This line is the actual fix that #47's review claimed to have
+        # made. That edit anchored on "self.beam = None / self.host_data =
+        # None", which appears in BOTH this method and __init__, and it
+        # matched __init__ first -- leaving a duplicate assignment there
+        # and this method untouched. An anchor that is not unique is not
+        # an anchor.
+        self.geometry_mm = None
         self.beam_status_tb.Text = message
         self.warnings_tb.Text = ""
         self.l_tb.Text = ""
@@ -389,6 +571,15 @@ class DetailBeamWindow(forms.WPFWindow):
         self.cover_end_end_tb.Text = ""
         self.start_support_tb.Text = ""
         self.end_support_tb.Text = ""
+        # #48 -- an explicit reset (no beam picked, or a refused pick)
+        # forces the crack tab closed and H_avail back to "no beam picked"
+        # rather than leaving whatever state the previous beam left behind.
+        # This is deliberately NOT the same code path as
+        # ``_on_h_or_layout_changed``'s "leave current state unchanged on
+        # an unparseable edit" -- that rule is for an in-progress keystroke,
+        # not for a beam being un-picked outright.
+        self.crack_bars_tab.IsEnabled = False
+        self.h_avail_tb.Text = ui_inputs.no_beam_picked_h_avail_message()
 
     def on_pick_click(self, sender, args):
         # Re-picking must repopulate everything and re-run support
@@ -496,6 +687,11 @@ class DetailBeamWindow(forms.WPFWindow):
         # --- everything above succeeded: populate and enable the fields.
         self.beam = beam
         self.host_data = host_data
+        # #48 -- set BEFORE ``h_tb.Text`` below, whose ``TextChanged`` fires
+        # ``_on_h_or_layout_changed`` -> ``_refresh_h_avail`` immediately:
+        # H_avail needs ``self.beam_covers_mm`` already set to compute
+        # anything rather than fall back to "no beam picked".
+        self.beam_covers_mm = beam_covers
         self.beam_status_tb.Text = "Picked beam id {}.".format(beam.Id)
         self.warnings_tb.Text = "\n".join(warning_lines)
         self.l_tb.Text = "{:.1f}".format(l_mm)
