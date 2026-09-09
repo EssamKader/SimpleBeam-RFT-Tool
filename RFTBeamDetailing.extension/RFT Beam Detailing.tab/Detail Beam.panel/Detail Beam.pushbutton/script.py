@@ -1617,7 +1617,7 @@ class DetailBeamWindow(forms.WPFWindow):
             )
 
         crack = None
-        if review.crack.requested:
+        if review.crack_bars.requested:
             # A26/A50: measured to the INNERMOST layer of each face, which
             # is the LAST plan layer, never the first. Both faces exist
             # here by construction -- A50 is what makes that true.

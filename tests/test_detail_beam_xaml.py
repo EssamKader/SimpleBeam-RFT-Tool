@@ -306,7 +306,7 @@ def test_the_window_is_never_shown_modally():
     # is wrong necessarily contains the word itself, and a guard that
     # cannot coexist with its own explanation is a guard that gets
     # deleted.
-    modal_calls = re.findall(r"\.ShowDialog\s*\(|show_dialog\s*\(", text)
+    modal_calls = re.findall(r"\.ShowDialog\s*\(|\bshow_dialog\s*\(", text)
     assert not modal_calls, (
         "the Detail Beam window must be shown modeless (forms.WPFWindow."
         "show(), modal=False by default). ShowDialog() disables Revit's "
@@ -435,13 +435,23 @@ def test_report_and_placement_both_use_the_shared_plan():
     Both must go through rft.core.plan, which is where those numbers are
     computed once and tested (tests/test_core_plan.py).
     """
-    for method in ("_report_one_main_face", "_build_placement_plans"):
+    # Named calls, not merely the substring "core_plan.": these two methods
+    # each make SEVERAL plan calls, so checking that the module is
+    # mentioned somewhere would still pass with one of them ripped out and
+    # recomputed by hand. Mutation testing is what exposed that -- the
+    # first version of this assertion survived exactly that change.
+    required = {
+        "_report_one_main_face": ("face_layer_plans", "end_plan"),
+        "_build_placement_plans": ("face_plan", "stirrup_plan", "crack_plan"),
+    }
+    for method, calls in required.items():
         body = _method_body(method)
-        assert "core_plan." in body, (
-            "%s must obtain its dimensions from rft.core.plan, not compute "
-            "them itself -- otherwise the report and the placed steel can "
-            "disagree (#56)." % method
-        )
+        for call in calls:
+            assert "core_plan.{}(".format(call) in body, (
+                "%s must obtain its dimensions from rft.core.plan.%s, not "
+                "compute them itself -- otherwise the Review report and the "
+                "placed steel can disagree (#56)." % (method, call)
+            )
 
 
 def test_the_placement_stub_is_gone():
@@ -450,3 +460,48 @@ def test_the_placement_stub_is_gone():
     """
     text = io.open(SCRIPT_PATH, encoding="utf-8").read()
     assert "raise NotImplementedError" not in text
+
+
+# --- attribute names on the derivation must exist -------------------------
+
+
+def test_every_review_attribute_the_script_uses_exists():
+    """The defect this test exists for reached a live host in v0.2.0-rc4.
+
+    ``_do_place`` read ``review.crack`` while the namedtuple field is
+    ``crack_bars``. Everything upstream worked -- the derivation was
+    correct, the report printed, the transaction opened -- and placement
+    died on an AttributeError at the last step, rolling back a beam the
+    engineer had every reason to expect would be detailed.
+
+    Nothing could catch it: ``script.py`` imports ``pyrevit`` and cannot
+    be imported under CPython, so no test ever evaluates that attribute
+    access. The names can still be compared as TEXT, which is the same
+    trick the x:Name cross-check uses, and it is enough.
+    """
+    from rft.ui.derivation import ReviewDerivation
+
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    used = set(re.findall(r"review\.([A-Za-z_][A-Za-z0-9_]*)", text))
+    # SELF-GUARD, and it earned its place immediately: the first
+    # version of this test carried a stray BACKSPACE byte in the
+    # pattern: a regex word boundary written into the file as a
+    # literal control character instead of two characters. It matched
+    # nothing, so ``used`` was empty, so the set difference was empty,
+    # so it PASSED -- against the very defect it was written for, and
+    # its mutation test is the only reason that was noticed.
+    #
+    # A text-based check that finds nothing is indistinguishable from
+    # one that finds nothing WRONG unless it says which it is.
+    assert used, (
+        "this test matched no review.<attr> access at all in script.py, "
+        "so it proves nothing: either the pattern is broken or the "
+        "code stopped using the derivation."
+    )
+    unknown = sorted(used - set(ReviewDerivation._fields))
+    assert not unknown, (
+        "script.py reads these attributes off a ReviewDerivation, which "
+        "has no such field -- an AttributeError on a live host, after the "
+        "transaction has already opened: %s (fields are %s)"
+        % (unknown, list(ReviewDerivation._fields))
+    )
