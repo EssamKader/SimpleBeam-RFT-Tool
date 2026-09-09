@@ -1,0 +1,237 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1080" width="1440" height="1080" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <pattern id="hatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#9aa0a6" stroke-width="1.4"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" fill="#3c4043"/>
+    </marker>
+    <marker id="tick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <line x1="2" y1="1" x2="8" y2="9" stroke="#3c4043" stroke-width="1.2"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1440" height="1080" fill="#ffffff"/>
+
+  <text x="40" y="46" font-size="26" font-weight="600" fill="#202124">RFT Beam Detailing — sketch notation and legend</text>
+  <text x="40" y="72" font-size="14" fill="#5f6368">Single-span rectangular beam. Every symbol below maps to a spec symbol and a spec section, and to the <tspan font-family="Consolas, monospace">rft.core</tspan> function that supplies its value (A48).</text>
+  <line x1="40" y1="86" x2="1400" y2="86" stroke="#dadce0" stroke-width="1"/>
+
+  <!-- ============================================================ SECTION -->
+  <text x="40" y="120" font-size="18" font-weight="600" fill="#202124">1 — Cross-section</text>
+  <text x="40" y="142" font-size="12.5" fill="#5f6368">True scale, 1 : 3.2. Example: b = 300, h = 900, cover 25, stirrup Ø10, main Ø16, spacer Ø16, crack Ø12.</text>
+
+  <!-- mm -> px: origin at section centroid, v positive UP (mirrors the WPF canvas transform) -->
+  <g transform="translate(250,470) scale(0.315,-0.315)">
+    <!-- concrete outline -->
+    <rect x="-150" y="-450" width="300" height="900" fill="#f8f9fa" stroke="#3c4043" stroke-width="7"/>
+    <!-- cover line -->
+    <rect x="-125" y="-425" width="250" height="850" fill="none" stroke="#9aa0a6" stroke-width="4" stroke-dasharray="16 12"/>
+    <!-- stirrup centreline rectangle -->
+    <rect x="-120" y="-420" width="240" height="840" fill="none" stroke="#0b6bcb" stroke-width="7"/>
+
+    <!-- top main bars, 3 @ offset_1 = 43 -->
+    <circle cx="-107" cy="407" r="25" fill="#c62828"/>
+    <circle cx="0"    cy="407" r="25" fill="#c62828"/>
+    <circle cx="107"  cy="407" r="25" fill="#c62828"/>
+
+    <!-- bottom main bars, layer 1: 4 @ offset_1 = 43 -->
+    <circle cx="-107"   cy="-407" r="25" fill="#c62828"/>
+    <circle cx="-35.7"  cy="-407" r="25" fill="#c62828"/>
+    <circle cx="35.7"   cy="-407" r="25" fill="#c62828"/>
+    <circle cx="107"    cy="-407" r="25" fill="#c62828"/>
+    <!-- bottom main bars, layer 2: 3 @ offset_2 = 75 -->
+    <circle cx="-107" cy="-375" r="25" fill="#c62828"/>
+    <circle cx="0"    cy="-375" r="25" fill="#c62828"/>
+    <circle cx="107"  cy="-375" r="25" fill="#c62828"/>
+
+    <!-- spacer bar between bottom layers, length 230 -->
+    <rect x="-115" y="-395" width="230" height="14" fill="#f9a825" stroke="#b28704" stroke-width="3"/>
+
+    <!-- crack / skin bars, 4 layers @ 162.8 -->
+    <circle cx="-109" cy="-244.2" r="19" fill="#2e7d32"/><circle cx="109" cy="-244.2" r="19" fill="#2e7d32"/>
+    <circle cx="-109" cy="-81.4"  r="19" fill="#2e7d32"/><circle cx="109" cy="-81.4"  r="19" fill="#2e7d32"/>
+    <circle cx="-109" cy="81.4"   r="19" fill="#2e7d32"/><circle cx="109" cy="81.4"   r="19" fill="#2e7d32"/>
+    <circle cx="-109" cy="244.2"  r="19" fill="#2e7d32"/><circle cx="109" cy="244.2"  r="19" fill="#2e7d32"/>
+  </g>
+
+  <!-- section annotations, drawn in px so text stays upright -->
+  <g font-size="12.5" fill="#3c4043">
+    <!-- b dimension -->
+    <line x1="203" y1="623" x2="297" y2="623" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <line x1="203" y1="615" x2="203" y2="631" stroke="#3c4043" stroke-width="1"/>
+    <line x1="297" y1="615" x2="297" y2="631" stroke="#3c4043" stroke-width="1"/>
+    <text x="250" y="645" text-anchor="middle">b = 300</text>
+
+    <!-- h dimension -->
+    <line x1="176" y1="328" x2="176" y2="612" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="170" y="474" text-anchor="middle" transform="rotate(-90 170 474)">h = 900</text>
+
+    <!-- cover leader -->
+    <line x1="330" y1="318" x2="300" y2="336" stroke="#9aa0a6" stroke-width="1"/>
+    <text x="334" y="316" fill="#5f6368">cover = 25  (all four faces read separately)</text>
+
+    <!-- stirrup leader -->
+    <line x1="330" y1="352" x2="288" y2="360" stroke="#0b6bcb" stroke-width="1"/>
+    <text x="334" y="350" fill="#0b6bcb">stirrup centreline 240 × 840</text>
+
+    <!-- offsets -->
+    <line x1="330" y1="588" x2="288" y2="598" stroke="#c62828" stroke-width="1"/>
+    <text x="334" y="586" fill="#c62828">offset₁ = 43 = cover + Ø_st + ½Ø_bar</text>
+    <line x1="330" y1="606" x2="292" y2="588" stroke="#c62828" stroke-width="1"/>
+    <text x="334" y="604" fill="#c62828">offset₂ = 75 = offset₁ + (Ø_bar + Ø_spacer)</text>
+
+    <!-- spacer leader -->
+    <line x1="330" y1="570" x2="284" y2="594" stroke="#b28704" stroke-width="1"/>
+    <text x="334" y="568" fill="#b28704">spacer length = 230 = b − 2·cover − 2·Ø_st</text>
+
+    <!-- clear spacing, with compliance colour -->
+    <line x1="216" y1="672" x2="238" y2="672" stroke="#2e7d32" stroke-width="1.4" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="246" y="676" fill="#2e7d32">clear spacing 55.3 ≥ 50 governing → <tspan font-weight="600">PASS</tspan></text>
+    <text x="246" y="693" fill="#5f6368" font-size="11.5">fails are drawn in red, with the achieved and governing values both shown</text>
+
+    <!-- crack bars leader -->
+    <line x1="330" y1="470" x2="286" y2="470" stroke="#2e7d32" stroke-width="1"/>
+    <text x="334" y="466" fill="#2e7d32">crack / skin bars — 4 layers @ 162.8 ≤ s_max 200</text>
+    <text x="334" y="483" fill="#5f6368" font-size="11.5">present only when h &gt; 700 (§5); one bar per side per layer</text>
+  </g>
+
+  <!-- ========================================================== ELEVATION -->
+  <text x="700" y="120" font-size="18" font-weight="600" fill="#202124">2 — Longitudinal elevation</text>
+  <text x="700" y="142" font-size="12.5" fill="#5f6368">Horizontal 1 : 14, vertical 1 : 3.6 — <tspan font-weight="600" fill="#b26500">vertical exaggerated, not to a single scale</tspan>, so the end anchorage stays legible on a 9 m span.</text>
+
+  <g transform="translate(700,180)">
+    <!-- supports -->
+    <rect x="0" y="70" width="22" height="150" fill="url(#hatch)" stroke="#5f6368" stroke-width="1.2"/>
+    <rect x="638" y="70" width="22" height="150" fill="url(#hatch)" stroke="#5f6368" stroke-width="1.2"/>
+    <!-- beam -->
+    <rect x="0" y="70" width="660" height="70" fill="#f8f9fa" stroke="#3c4043" stroke-width="2"/>
+
+    <!-- top bar: straight run then DOWNWARD bend at both ends -->
+    <path d="M6,104 L6,80 L654,80 L654,104" fill="none" stroke="#c62828" stroke-width="2.6"/>
+    <!-- bottom bar: straight run then UPWARD bend at both ends -->
+    <path d="M6,108 L6,131 L654,131 L654,108" fill="none" stroke="#c62828" stroke-width="2.6" stroke-dasharray="none"/>
+
+    <!-- crack bar at mid depth -->
+    <line x1="4" y1="105" x2="656" y2="105" stroke="#2e7d32" stroke-width="2"/>
+
+    <!-- zone bands -->
+    <g font-size="11.5" fill="#0b6bcb" text-anchor="middle">
+      <rect x="24" y="146" width="204" height="20" fill="#e8f0fe" stroke="#0b6bcb" stroke-width="0.8"/>
+      <rect x="228" y="146" width="204" height="20" fill="#f1f3f4" stroke="#9aa0a6" stroke-width="0.8"/>
+      <rect x="432" y="146" width="204" height="20" fill="#e8f0fe" stroke="#0b6bcb" stroke-width="0.8"/>
+      <text x="126" y="160">Zone 1 — dense · 20 @ 150</text>
+      <text x="330" y="160" fill="#5f6368">Zone 2 — normal · 15 @ 200</text>
+      <text x="534" y="160">Zone 3 — dense · 20 @ 150</text>
+    </g>
+
+    <!-- stirrup ticks: SCHEMATIC, evenly spaced, not predicted positions -->
+    <g stroke="#0b6bcb" stroke-width="1.1" opacity="0.85">
+      <line x1="30" y1="72" x2="30" y2="138"/><line x1="46" y1="72" x2="46" y2="138"/><line x1="62" y1="72" x2="62" y2="138"/>
+      <line x1="78" y1="72" x2="78" y2="138"/><line x1="94" y1="72" x2="94" y2="138"/><line x1="110" y1="72" x2="110" y2="138"/>
+      <line x1="126" y1="72" x2="126" y2="138"/><line x1="142" y1="72" x2="142" y2="138"/><line x1="158" y1="72" x2="158" y2="138"/>
+      <line x1="174" y1="72" x2="174" y2="138"/><line x1="190" y1="72" x2="190" y2="138"/><line x1="206" y1="72" x2="206" y2="138"/>
+      <line x1="222" y1="72" x2="222" y2="138"/>
+      <line x1="246" y1="72" x2="246" y2="138"/><line x1="270" y1="72" x2="270" y2="138"/><line x1="294" y1="72" x2="294" y2="138"/>
+      <line x1="318" y1="72" x2="318" y2="138"/><line x1="342" y1="72" x2="342" y2="138"/><line x1="366" y1="72" x2="366" y2="138"/>
+      <line x1="390" y1="72" x2="390" y2="138"/><line x1="414" y1="72" x2="414" y2="138"/>
+      <line x1="438" y1="72" x2="438" y2="138"/><line x1="454" y1="72" x2="454" y2="138"/><line x1="470" y1="72" x2="470" y2="138"/>
+      <line x1="486" y1="72" x2="486" y2="138"/><line x1="502" y1="72" x2="502" y2="138"/><line x1="518" y1="72" x2="518" y2="138"/>
+      <line x1="534" y1="72" x2="534" y2="138"/><line x1="550" y1="72" x2="550" y2="138"/><line x1="566" y1="72" x2="566" y2="138"/>
+      <line x1="582" y1="72" x2="582" y2="138"/><line x1="598" y1="72" x2="598" y2="138"/><line x1="614" y1="72" x2="614" y2="138"/>
+      <line x1="630" y1="72" x2="630" y2="138"/>
+    </g>
+
+    <!-- anchorage dimensions at the left support -->
+    <g font-size="11.5" fill="#3c4043">
+      <line x1="6" y1="52" x2="22" y2="52" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+      <text x="14" y="44" text-anchor="middle">a</text>
+      <line x1="-16" y1="80" x2="-16" y2="104" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+      <text x="-22" y="95" text-anchor="end">b</text>
+      <text x="34" y="44" fill="#5f6368">a = support width − support cover · b = LD − a · b ≥ 200</text>
+    </g>
+
+    <!-- span dimension -->
+    <line x1="0" y1="240" x2="660" y2="240" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="330" y="256" font-size="12.5" fill="#3c4043" text-anchor="middle">L (centre to centre) = 9000</text>
+
+    <text x="24" y="186" font-size="11.5" fill="#b26500">stirrup ticks are SCHEMATIC — spacing shown as “n @ s”, positions laid out by Revit, never dimensioned individually</text>
+  </g>
+
+  <!-- 135 degree hook detail bubble -->
+  <g transform="translate(1180,470)">
+    <circle cx="0" cy="0" r="66" fill="#f8f9fa" stroke="#0b6bcb" stroke-width="1.4"/>
+    <path d="M-40,26 L-40,-26 L34,-26" fill="none" stroke="#0b6bcb" stroke-width="3.4"/>
+    <path d="M34,-26 L60,10" fill="none" stroke="#0b6bcb" stroke-width="3.4"/>
+    <path d="M20,-26 A14,14 0 0 1 34,-12" fill="none" stroke="#5f6368" stroke-width="1"/>
+    <text x="16" y="-2" font-size="11" fill="#5f6368">135°</text>
+    <text x="0" y="88" font-size="12" fill="#0b6bcb" text-anchor="middle" font-weight="600">Stirrup hook — 135°</text>
+    <text x="0" y="104" font-size="11" fill="#5f6368" text-anchor="middle">Stirrup/Tie family only (§7.3, A45)</text>
+    <text x="0" y="119" font-size="11" fill="#b26500" text-anchor="middle">bend arc is schematic</text>
+  </g>
+
+  <!-- ============================================================= LEGEND -->
+  <line x1="40" y1="722" x2="1400" y2="722" stroke="#dadce0" stroke-width="1"/>
+  <text x="40" y="752" font-size="18" font-weight="600" fill="#202124">3 — Legend</text>
+  <text x="40" y="774" font-size="12.5" fill="#5f6368">The mapping a new user needs: what is drawn, what the tool calls it, and where the rule lives.</text>
+
+  <g font-size="12.5">
+    <g fill="#5f6368" font-size="11.5" font-weight="600">
+      <text x="96" y="800">DRAWN AS</text><text x="250" y="800">MEANS</text><text x="520" y="800">TOOL SYMBOL</text><text x="650" y="800">SPEC</text>
+      <text x="800" y="800">DRAWN AS</text><text x="954" y="800">MEANS</text><text x="1224" y="800">TOOL SYMBOL</text><text x="1354" y="800">SPEC</text>
+    </g>
+    <line x1="40" y1="806" x2="1400" y2="806" stroke="#dadce0" stroke-width="1"/>
+
+    <!-- left column -->
+    <g fill="#202124">
+      <rect x="48" y="816" width="40" height="14" fill="#f8f9fa" stroke="#3c4043" stroke-width="2"/>
+      <text x="250" y="828">Concrete outline of the section</text><text x="520" y="828" font-family="Consolas, monospace">b, h</text><text x="650" y="828" fill="#5f6368">read from model</text>
+
+      <line x1="48" y1="850" x2="88" y2="850" stroke="#9aa0a6" stroke-width="2.5" stroke-dasharray="6 5"/>
+      <text x="250" y="854">Concrete cover, each face read separately</text><text x="520" y="854" font-family="Consolas, monospace">cover</text><text x="650" y="854" fill="#5f6368">§1.1</text>
+
+      <rect x="48" y="870" width="40" height="16" fill="none" stroke="#0b6bcb" stroke-width="2.5"/>
+      <text x="250" y="882">Stirrup, drawn on its centreline</text><text x="520" y="882" font-family="Consolas, monospace">Ø_st</text><text x="650" y="882" fill="#5f6368">§7.1, A30</text>
+
+      <circle cx="68" cy="908" r="8" fill="#c62828"/>
+      <text x="250" y="912">Main bar — top or bottom</text><text x="520" y="912" font-family="Consolas, monospace">Ø_bar</text><text x="650" y="912" fill="#5f6368">§4, §6.1</text>
+
+      <circle cx="68" cy="936" r="6" fill="#2e7d32"/>
+      <text x="250" y="940">Crack / skin bar, one per side per layer</text><text x="520" y="940" font-family="Consolas, monospace">Ø_crack</text><text x="650" y="940" fill="#5f6368">§5, A24</text>
+
+      <rect x="48" y="962" width="40" height="8" fill="#f9a825" stroke="#b28704" stroke-width="1.4"/>
+      <text x="250" y="970">Spacer between stacked bar layers</text><text x="520" y="970" font-family="Consolas, monospace">Ø_spacer</text><text x="650" y="970" fill="#5f6368">§6.3</text>
+
+      <line x1="48" y1="996" x2="88" y2="996" stroke="#3c4043" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+      <text x="250" y="1000">Dimension the tool computed and can defend</text><text x="520" y="1000" font-family="Consolas, monospace">—</text><text x="650" y="1000" fill="#5f6368">exact</text>
+    </g>
+
+    <!-- right column -->
+    <g fill="#202124">
+      <text x="752" y="828" font-size="13" fill="#2e7d32" font-weight="600">55.3 ≥ 50</text>
+      <text x="954" y="828">Green dimension — complies</text><text x="1224" y="828" font-family="Consolas, monospace">passes</text><text x="1354" y="828" fill="#5f6368">§6.2/§6.4</text>
+
+      <text x="752" y="854" font-size="13" fill="#c62828" font-weight="600">41.0 &lt; 50</text>
+      <text x="954" y="854">Red dimension — violates, refuses on Place</text><text x="1224" y="854" font-family="Consolas, monospace">passes</text><text x="1354" y="854" fill="#5f6368">A44</text>
+
+      <rect x="800" y="870" width="40" height="16" fill="#e8f0fe" stroke="#0b6bcb" stroke-width="0.8"/>
+      <text x="954" y="882">Dense stirrup zone (1 and 3)</text><text x="1224" y="882" font-family="Consolas, monospace">dense</text><text x="1354" y="882" fill="#5f6368">§3.1, A15</text>
+
+      <rect x="800" y="898" width="40" height="16" fill="#f1f3f4" stroke="#9aa0a6" stroke-width="0.8"/>
+      <text x="954" y="910">Normal stirrup zone (2)</text><text x="1224" y="910" font-family="Consolas, monospace">normal</text><text x="1354" y="910" fill="#5f6368">§3.2, A18</text>
+
+      <g stroke="#0b6bcb" stroke-width="1.1"><line x1="806" y1="928" x2="806" y2="946"/><line x1="818" y1="928" x2="818" y2="946"/><line x1="830" y1="928" x2="830" y2="946"/><line x1="842" y1="928" x2="842" y2="946"/></g>
+      <text x="954" y="940" fill="#b26500">Schematic ticks — count and spacing are real, positions are not</text><text x="1224" y="940" font-family="Consolas, monospace">n @ s</text><text x="1354" y="940" fill="#5f6368">Revit lays out</text>
+
+      <rect x="800" y="956" width="40" height="16" fill="url(#hatch)" stroke="#5f6368" stroke-width="1"/>
+      <text x="954" y="970">Supporting element — column, wall or girder</text><text x="1224" y="970" font-family="Consolas, monospace">a</text><text x="1354" y="970" fill="#5f6368">§2.4, A9</text>
+
+      <path d="M800,1000 L800,988 L836,988" fill="none" stroke="#c62828" stroke-width="2.4"/>
+      <text x="954" y="1000">Bar end bent into the support — top bends down</text><text x="1224" y="1000" font-family="Consolas, monospace">a, b, LD</text><text x="1354" y="1000" fill="#5f6368">§2.1–§2.3</text>
+    </g>
+  </g>
+
+  <line x1="40" y1="1022" x2="1400" y2="1022" stroke="#dadce0" stroke-width="1"/>
+  <text x="40" y="1044" font-size="12" fill="#b26500" font-weight="600">Two things on this drawing are deliberately schematic, because Revit owns them and not this tool:</text>
+  <text x="40" y="1062" font-size="12" fill="#5f6368">individual stirrup positions (laid out by the rebar set — count and spacing are exact, stations are not) and hook bend arcs (governed by the bar type's bend radius — the 135° angle and the leg length are exact). Everything else is computed by <tspan font-family="Consolas, monospace">rft.core</tspan> and can be defended against a spec section.</text>
+</svg>
