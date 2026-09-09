@@ -69,6 +69,38 @@ first missing selection:
    - `ROLE_CRACK` -- high tensile St 36/52, used only by "Place Crack Bars"
      when section 5's h > 700 mm trigger fires.
 
+   **A bar type's NAME routinely disagrees with its diameter, and the name
+   is not what the tool uses.** Measured live in the verification model
+   after a library import:
+
+   | Type name | Actual `BarNominalDiameter` |
+   |---|---|
+   | `10M` | **9.50 mm** |
+   | `13M` | 12.70 mm |
+   | `16M` | **15.90 mm** |
+   | `19M` | 19.10 mm |
+   | `22M` | 22.20 mm |
+   | `25M` | 25.40 mm |
+
+   Those are Imperial #3/#4/#5/#6/#7/#8 bars carrying metric-looking `M`
+   designations -- not ECP metric bars. Picking `16M` for what the spec
+   calls a Ø16 bar gives **15.9 mm**, and that 15.9 then flows correctly
+   through every formula (`LD = 60 × Ø`, the §6.2 minimum spacing, the §4
+   layer offsets, the §2.2 clearance), because A42 makes the type's own
+   diameter the single source of truth. The tool is not wrong here -- the
+   *model* does not contain the bars the spec assumes.
+
+   Two consequences worth knowing before a production run:
+
+   - **The picker labels every type with its measured diameter**
+     (`16M  --  15.9 mm`), which is the only place this is visible before
+     committing. Read the millimetres, not the name.
+   - **If you want true ECP diameters, import or create metric bar types**
+     (Ø10, Ø12, Ø16, Ø18, Ø20, Ø22, Ø25) in the target model or template.
+     Nothing in the tool requires it -- it details correctly with whatever
+     diameter the selected type reports -- but a schedule reading `16M` at
+     15.9 mm is not what an ECP drawing set expects.
+
 2. **A `RebarHookType` from the Stirrup/Tie family, at 135 degrees**
    (rev 2 section 7.3, A45, superseding A33's 180 degrees; issue #25/#31,
    verified against a live Revit 2024 host, `RevitAPI 24.3.40.0`).

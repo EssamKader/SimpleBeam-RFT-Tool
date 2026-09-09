@@ -1089,3 +1089,124 @@ class _FakeDocGetElement(object):
             if id_ == element_id:
                 return element
         return None
+
+
+# --- Element names: the ElementType-hidden-property trap -------------------
+#
+# v0.1.0-rc3 died in the live picker with
+#     AttributeError: 'RebarBarType' object has no attribute 'Name'
+# raised inside pyRevit's own TemplateListItem.name, which did
+# getattr(item, "Name") because the scripts passed name_attr="Name".
+# Name's declaring type is ElementType, which HIDES Element.Name, and
+# IronPython's binder does not expose a property shadowed that way --
+# confirmed live, alongside C# reading the same property happily. The name
+# is reachable only through SYMBOL_NAME_PARAM.
+
+
+def test_fakes_have_no_name_attribute_because_ironpython_cannot_reach_it():
+    """The fake must not offer what the real language binding withholds.
+
+    This is the assertion whose absence let the bug through: the fakes
+    previously set ``self.Name = name``, so every unit test could read an
+    attribute that does not exist under IronPython. If someone restores
+    ``.Name`` to the fakes, the suite goes green again while the buttons
+    stay broken -- so the absence is asserted explicitly.
+    """
+    bar_type = FakeRebarBarType(bar_nominal_diameter=16.0, name="16M")
+    hook_type = FakeRebarHookType(angle_deg=135, name="Stirrup/Tie - 135 deg.", style=1)
+    assert not hasattr(bar_type, "Name")
+    assert not hasattr(hook_type, "Name")
+
+
+def test_element_name_reads_symbol_name_param_for_both_type_classes():
+    from rft.revit.bar_types import element_name
+
+    bar_type = FakeRebarBarType(bar_nominal_diameter=16.0, name="16M")
+    hook_type = FakeRebarHookType(angle_deg=135, name="Stirrup/Tie - 135 deg.", style=1)
+    assert element_name(bar_type) == "16M"
+    assert element_name(hook_type) == "Stirrup/Tie - 135 deg."
+
+
+def test_element_name_falls_back_to_a_visible_placeholder_not_an_exception():
+    """A nameless type must still appear in the picker.
+
+    Raising here would take down the whole dialog over one bad type,
+    hiding every good one; the placeholder puts the problem in front of
+    the engineer instead.
+    """
+    from rft.revit.bar_types import element_name
+
+    bar_type = FakeRebarBarType(bar_nominal_diameter=16.0, name=None, id_value=4321)
+    assert element_name(bar_type) == "<unnamed, id 4321>"
+
+
+def test_bar_type_options_sort_by_diameter_and_label_the_real_diameter(monkeypatch):
+    """Names lie about diameter, so the label must carry the measurement.
+
+    These are the actual values measured in the live verification model:
+    10M is 9.50 mm, 16M is 15.90 mm, 25M is 25.40 mm -- Imperial #3/#5/#8
+    bars wearing metric-looking names. A42 makes the type's own diameter
+    the single source of truth, and this label is the only place the
+    engineer can see it before committing.
+
+    Sorting is by diameter, not name: a name sort puts '10M' before '9M'.
+    """
+    from fake_revit_api import FakeFilteredElementCollector
+    from rft.revit.bar_types import bar_type_options
+
+    ten_m = FakeRebarBarType(bar_nominal_diameter=9.50, name="10M")
+    twentyfive_m = FakeRebarBarType(bar_nominal_diameter=25.40, name="25M")
+    sixteen_m = FakeRebarBarType(bar_nominal_diameter=15.90, name="16M")
+    monkeypatch.setattr(
+        FakeFilteredElementCollector, "_ITEMS", [twentyfive_m, ten_m, sixteen_m]
+    )
+
+    options = bar_type_options(None, from_internal_units=lambda v: v)
+
+    assert [label for label, _element in options] == [
+        "10M  --  9.5 mm",
+        "16M  --  15.9 mm",
+        "25M  --  25.4 mm",
+    ]
+    assert [element for _label, element in options] == [ten_m, sixteen_m, twentyfive_m]
+
+
+def test_bar_type_options_labels_are_unique_keys_for_the_reverse_lookup(monkeypatch):
+    """The picker returns a label, and the caller maps it back via dict().
+
+    Two identically-named types of different diameter must not collide, or
+    selecting one would silently place the other.
+    """
+    from fake_revit_api import FakeFilteredElementCollector
+    from rft.revit.bar_types import bar_type_options
+
+    small = FakeRebarBarType(bar_nominal_diameter=12.0, name="Duplicate")
+    large = FakeRebarBarType(bar_nominal_diameter=16.0, name="Duplicate")
+    monkeypatch.setattr(FakeFilteredElementCollector, "_ITEMS", [small, large])
+
+    options = bar_type_options(None, from_internal_units=lambda v: v)
+    labels = [label for label, _element in options]
+
+    assert len(set(labels)) == 2, labels
+    assert dict(options)[labels[0]] is small
+    assert dict(options)[labels[1]] is large
+
+
+def test_hook_type_options_label_the_angle_and_mark_an_unreadable_one():
+    """Names lie about family and angle both (hook_style's docstring).
+
+    An unreadable angle is labelled, not hidden: the list is already
+    family-filtered, so a hook arriving here with no readable angle is
+    something the engineer should see. It is still refused after selection.
+    """
+    from rft.revit.bar_types import hook_type_options
+
+    readable = FakeRebarHookType(angle_deg=135, name="Stirrup/Tie - 135 deg.", style=1)
+    unreadable = FakeRebarHookType(angle_deg=None, name="Mystery hook", style=1)
+
+    options = hook_type_options([readable, unreadable])
+
+    assert [label for label, _element in options] == [
+        "Stirrup/Tie - 135 deg.  --  135 deg",
+        "Mystery hook  --  angle UNREADABLE",
+    ]

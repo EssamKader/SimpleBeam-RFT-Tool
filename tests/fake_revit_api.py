@@ -357,6 +357,22 @@ class FakeRebarHookStyleParameter(object):
         return self._style
 
 
+class FakeStringParameter(object):
+    """A ``StorageType.String`` parameter, as ``SYMBOL_NAME_PARAM`` is.
+
+    VERIFIED LIVE (Revit 2024, ``RevitAPI 24.3.40.0``): reading an
+    ``ElementType``'s ``SYMBOL_NAME_PARAM`` returns a String-storage
+    parameter whose ``AsString()`` equals what C# ``Element.Name`` returns
+    -- ``'10M'``, ``'Stirrup/Tie - 135 deg.'``.
+    """
+
+    def __init__(self, value):
+        self._value = value
+
+    def AsString(self):
+        return self._value
+
+
 class FakeRebarHookType(object):
     """SHAPE UNVERIFIED (narrowed by issue #25/#31's live probe -- see
     module header) -- stand-in for `Autodesk.Revit.DB.Structure.
@@ -374,18 +390,28 @@ class FakeRebarHookType(object):
     ``rft.core.grades.unreadable_hook_style_message``). Pass ``style=1``
     (``HOOK_STYLE_STIRRUP_TIE``) or ``style=0`` (``HOOK_STYLE_STANDARD``)
     to simulate a readable family.
+
+    DELIBERATELY HAS NO ``.Name`` ATTRIBUTE, for the same reason
+    ``FakeRebarBarType`` does not -- ``RebarHookType.Name`` also declares
+    on ``ElementType`` and is also unreachable from IronPython. The name is
+    exposed only through ``SYMBOL_NAME_PARAM``.
     """
 
-    def __init__(self, angle_deg=None, name=None, style=None):
+    def __init__(self, angle_deg=None, name=None, style=None, id_value=None):
         self.angle_deg = angle_deg
-        self.Name = name
+        self._name = name
         self.style = style
+        self.Id = id_value
 
     def get_Parameter(self, built_in_parameter):
         if built_in_parameter is FakeBuiltInParameter.REBAR_HOOK_STYLE:
             if self.style is None:
                 return None
             return FakeRebarHookStyleParameter(self.style)
+        if built_in_parameter is FakeBuiltInParameter.SYMBOL_NAME_PARAM:
+            if self._name is None:
+                return None
+            return FakeStringParameter(self._name)
         if self.angle_deg is None:
             return None
         return FakeRebarHookAngleParameter(self.angle_deg)
@@ -432,11 +458,31 @@ class FakeRebar(object):
 
 class FakeRebarBarType(object):
     """SHAPE UNVERIFIED -- ``BarNominalDiameter`` (issue #20, S7). See
-    tests/fake_revit_api.py header."""
+    tests/fake_revit_api.py header.
 
-    def __init__(self, bar_nominal_diameter=None, name=None):
+    DELIBERATELY HAS NO ``.Name`` ATTRIBUTE. The real
+    ``RebarBarType.Name`` is inaccessible from pyRevit's IronPython 2.7
+    engine -- ``Name``'s declaring type is ``ElementType``, which hides
+    ``Element.Name``, and IronPython's binder does not expose a property
+    shadowed that way (``AttributeError: 'RebarBarType' object has no
+    attribute 'Name'``, live, v0.1.0-rc3). An earlier version of this fake
+    set ``self.Name = name``, which is exactly why the test suite could
+    not see that failure coming: the fake modelled an attribute the real
+    language binding does not provide. The name is reachable here only the
+    way it is reachable live -- through ``SYMBOL_NAME_PARAM``.
+    """
+
+    def __init__(self, bar_nominal_diameter=None, name=None, id_value=None):
         self.BarNominalDiameter = bar_nominal_diameter
-        self.Name = name
+        self._name = name
+        self.Id = id_value
+
+    def get_Parameter(self, built_in_parameter):
+        if built_in_parameter is FakeBuiltInParameter.SYMBOL_NAME_PARAM:
+            if self._name is None:
+                return None
+            return FakeStringParameter(self._name)
+        return None
 
 
 class FakeBuiltInParameter(object):
@@ -447,6 +493,11 @@ class FakeBuiltInParameter(object):
 
     REBAR_HOOK_ANGLE = object()
     REBAR_HOOK_STYLE = object()
+    # VERIFIED LIVE (Revit 2024): holds an ElementType's name as a
+    # StorageType.String parameter, for both RebarBarType and
+    # RebarHookType -- the only route to a name from IronPython, since
+    # ``.Name`` is hidden behind ElementType (see FakeRebarBarType).
+    SYMBOL_NAME_PARAM = object()
 
 
 class FakeOptions(object):

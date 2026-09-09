@@ -155,3 +155,91 @@ def hook_style(hook_type):
         return param.AsInteger()
     except (AttributeError, TypeError):
         return None
+
+
+def element_name(element):
+    """An ``ElementType``'s name, read from ``SYMBOL_NAME_PARAM``.
+
+    VERIFIED LIVE (Revit 2024, ``RevitAPI 24.3.40.0``): returns a
+    ``StorageType.String`` parameter holding exactly what ``Element.Name``
+    returns in C# -- ``'10M'``, ``'Stirrup/Tie - 135 deg.'`` -- for both
+    ``RebarBarType`` and ``RebarHookType``.
+
+    WHY NOT ``element.Name``: it raises ``AttributeError: 'RebarBarType'
+    object has no attribute 'Name'`` under pyRevit's IronPython 2.7 engine.
+    ``Name``'s declaring type is ``Autodesk.Revit.DB.ElementType``, which
+    **hides** (C# ``new``) ``Element.Name``, and IronPython's binder does
+    not expose a property shadowed that way. Confirmed live: the property's
+    ``DeclaringType.FullName`` is ``Autodesk.Revit.DB.ElementType`` for
+    both classes, and C# reads it happily -- so this is a language-binding
+    failure, not a missing member. It killed the picker in v0.1.0-rc3 the
+    moment pyRevit's ``TemplateListItem.name`` did ``getattr(item, 'Name')``
+    on our behalf, which is why no ``name_attr`` is passed any more.
+
+    Returns a bracketed placeholder rather than raising if the parameter is
+    missing or blank: a nameless type must still be visible in the picker,
+    where the engineer can see something is wrong, instead of taking down
+    the whole dialog.
+    """
+    from Autodesk.Revit.DB import BuiltInParameter
+
+    param = element.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+    if param is not None:
+        value = param.AsString()
+        if value:
+            return value
+    return "<unnamed, id {}>".format(element.Id)
+
+
+def bar_type_options(document, from_internal_units):
+    """``(label, bar_type)`` pairs for the per-role picker, sorted by
+    diameter -- ascending and numeric, not by name.
+
+    The label carries the type's ACTUAL diameter in mm, because a bar
+    type's name routinely disagrees with it and A42 makes the type's own
+    diameter the single source of truth for every downstream computation.
+    Measured live in the verification model: ``10M`` is **9.50 mm**,
+    ``16M`` is **15.90 mm**, ``25M`` is **25.40 mm** -- Imperial #3/#5/#8
+    bars carrying metric-looking names. An engineer picking ``16M`` for a
+    "diameter 16 bar" gets 15.9 mm through every formula, correctly, and
+    the label is the only place that can be seen before committing.
+
+    Sorting by name would also order ``10M`` before ``9M``; sorting by
+    diameter puts the list in the order a bar schedule is read.
+    """
+    rows = []
+    for bar_type in list_bar_types(document):
+        diameter_mm = bar_type_diameter_mm(bar_type, from_internal_units)
+        rows.append(
+            (
+                "{}  --  {:.1f} mm".format(element_name(bar_type), diameter_mm),
+                bar_type,
+                diameter_mm,
+            )
+        )
+    rows.sort(key=lambda row: row[2])
+    return [(label, bar_type) for label, bar_type, _diameter in rows]
+
+
+def hook_type_options(hook_types):
+    """``(label, hook_type)`` pairs for the stirrup hook picker.
+
+    The label carries the angle read back from the type rather than its
+    name, for the reason ``hook_style``'s docstring records: names lie.
+    The live model holds ``Stirrup/Tie - 45`` at ``REBAR_HOOK_STYLE == 0``,
+    and ``Standard - 135 deg.`` at the required angle in the wrong family.
+    An unreadable angle is LABELLED as unreadable rather than omitted or
+    guessed -- ``hook_types`` is already family-filtered, so a hook
+    reaching here with no readable angle is something the engineer should
+    see, and selecting it is still refused after the fact by
+    ``hook_angle_guard_message``'s caller.
+    """
+    options = []
+    for hook_type in hook_types:
+        angle_deg = hook_angle_deg(hook_type)
+        if angle_deg is None:
+            label = "{}  --  angle UNREADABLE".format(element_name(hook_type))
+        else:
+            label = "{}  --  {:.0f} deg".format(element_name(hook_type), angle_deg)
+        options.append((label, hook_type))
+    return options

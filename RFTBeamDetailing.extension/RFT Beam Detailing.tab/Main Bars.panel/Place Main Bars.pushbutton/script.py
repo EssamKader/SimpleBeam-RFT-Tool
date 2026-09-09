@@ -80,7 +80,10 @@ from rft.core.spacing import (
     governing_min_spacing_mm,
     validate_face_spacing,
 )
-from rft.revit.bar_types import bar_type_diameter_mm, list_bar_types
+from rft.revit.bar_types import (
+    bar_type_diameter_mm,
+    bar_type_options,
+)
 from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
@@ -146,16 +149,22 @@ def select_bar_type_for_role(document, role):
     docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
     signature.
     """
-    bar_types = list_bar_types(document)
-    if not bar_types:
+    options = bar_type_options(document, internal_to_mm)
+    if not options:
         return None
-    return forms.SelectFromList.show(
-        bar_types,
+    # No name_attr: pyRevit would getattr(item, "Name"), which raises
+    # AttributeError under IronPython for an ElementType-hidden property
+    # (see rft.revit.bar_types.element_name). Plain label strings are
+    # passed instead and mapped back to the element afterwards.
+    selected_label = forms.SelectFromList.show(
+        [label for label, _element in options],
         multiselect=False,
-        name_attr="Name",
         title="Select RebarBarType -- {}".format(role_picker_label(role)),
         button_name="Select",
     )
+    if selected_label is None:
+        return None
+    return dict(options)[selected_label]
 
 
 def ask_inputs():
