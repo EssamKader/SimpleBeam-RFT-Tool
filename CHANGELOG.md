@@ -36,6 +36,72 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.2.0-rc1] — 2026-09-10
+
+**A test candidate, not a release.** Cut so the new single window can be
+opened for the first time. `v0.1.0` remains the only *verified* version, and
+its three pushbuttons are still on the ribbon and still work — this
+candidate **adds** a fourth button and deletes nothing.
+
+### What to expect on the ribbon
+
+A new **Detail Beam** panel and button, alongside `Place Main Bars`,
+`Place Stirrups` and `Place Crack Bars`. Both sets are loaded deliberately:
+the three are the verified tool, the new one cannot place anything yet.
+
+**A full Revit restart is required**, not just a pyRevit reload — the panel
+is new, and pyRevit only builds ribbon panels at startup.
+
+### What the new window does
+
+- Five tabs: Beam & Materials, Main bars, Stirrups, Crack bars, Review.
+- Pick a beam and its `L`, `b`, `h` fill in and stay **editable**; the four
+  covers are read from the beam's own faces, per face, with a supported end
+  shown as "n/a (supported)" rather than a number.
+- One `RebarBarType` picker per role plus the stirrup `RebarHookType`, each
+  option labelled with the **measured** diameter — the type names disagree
+  with the diameters in this document (`16M` is 15.9 mm), and the measured
+  value is what the tool details against.
+- The hook list is filtered to the Stirrup/Tie family, and the pick is
+  re-checked after selection (A45). An unreadable hook angle is accepted but
+  says so, rather than passing in silence.
+- Main bars, Stirrups and Crack bars tabs collect their inputs. Bar counts
+  and layer counts ship **blank** on purpose.
+- `H_avail` is computed live from the Main bars tab and shown read-only, so
+  it can no longer disagree with the beam the way it could in `v0.1.0`.
+- The Crack bars tab enables itself only when `h > 700`, tracking edits to
+  `h` as they are typed.
+
+### What it does NOT do
+
+**Place is a stub.** It validates the inputs, refuses by name if a required
+bar type or hook is unpicked, and then reports that placement is not built
+yet — pointing at the three existing buttons. That is expected, not a fault.
+Placement is #56, which ports the verified buttons' placement paths into the
+single all-or-nothing transaction.
+
+### Closes
+
+#46 (the shell), #47 (Beam & Materials), #48 (the three reinforcement tabs).
+Opened #56 after finding that no story in the set owned the placement port.
+
+### What is verified, and what is not
+
+308 tests pass, both modules compile, and the XAML/script name cross-check
+covers every filled-in tab. **None of that is evidence the window opens.**
+This candidate exists precisely because a green suite has never been
+evidence of that in this project — six candidates were needed to get
+`v0.1.0` running, and every one of those failures was a wrong API name that
+the tests could not see.
+
+Three WPF assumptions are load-bearing here and unexercised: that a
+programmatic `.Text` assignment raises `TextChanged` (this is what enables
+the Crack bars tab after a pick), that `TabItem.IsEnabled = False` greys a
+tab header, and that a `ComboBox` bound to a list of strings renders the
+text rather than a Python repr.
+
+---
+
 ## [v0.1.0] — 2026-09-09
 
 **First release, and the first version of this code ever to run.** All three
