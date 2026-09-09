@@ -1,0 +1,114 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Detail Beam"
+        Height="680" Width="880"
+        MinHeight="520" MinWidth="640"
+        WindowStartupLocation="CenterScreen"
+        SizeToContent="Manual">
+
+    <!-- Shell only (issue #46, U2): one WPFWindow, one TabControl, proven
+         by the #42 spike, no Expander fallback needed. Tab CONTENTS are
+         #47 (Beam & Materials), #48 (Main bars / Stirrups / Crack bars) and
+         #50 (Review): every non-"Beam & Materials" tab below is a
+         clearly-labelled placeholder, not a stub pretending to be finished. -->
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Margin="2,0,2,8" TextWrapping="Wrap"
+                   Text="Detail Beam -- one command, one transaction (A46/A47). Pick a beam on the Beam &amp; Materials tab first (A35): every geometry and support field stays disabled until you do."/>
+
+        <TabControl x:Name="tabs" Grid.Row="1">
+
+            <TabItem Header="Beam &amp; Materials">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="10">
+
+                        <!-- A35: the pick control sits at the TOP of this tab,
+                             and is the only thing enabled before a beam is picked. -->
+                        <Button x:Name="pick_btn" Content="Pick beam..."
+                                HorizontalAlignment="Left" Padding="14,4" Margin="0,0,0,6"/>
+                        <TextBlock x:Name="beam_status_tb" FontWeight="Bold"
+                                   Text="No beam picked yet." Margin="0,0,0,6"/>
+                        <TextBlock x:Name="warnings_tb" Foreground="#FFB05A00"
+                                   TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
+
+                        <!-- Disabled as a whole group until a successful pick;
+                             re-picking repopulates every field below and
+                             re-runs support detection (A35). -->
+                        <StackPanel x:Name="geometry_panel" IsEnabled="False">
+                            <TextBlock Text="Geometry (read from the model)" FontWeight="Bold" Margin="0,4,0,4"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="L (mm)"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="b (mm)"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="h (mm)"/>
+                                <TextBox x:Name="l_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0"/>
+                                <TextBox x:Name="b_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0"/>
+                                <TextBox x:Name="h_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
+                            </Grid>
+
+                            <TextBlock Text="Covers (read from the beam's own faces)" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="covers_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
+
+                            <TextBlock Text="Support detection, per end" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="start_support_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
+                            <TextBlock x:Name="end_support_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
+
+                            <TextBlock TextWrapping="Wrap" FontStyle="Italic"
+                                       Text="Bar-type pickers, the stirrup hook and the four per-face covers as individually editable fields are #47's scope (Beam &amp; Materials tab), not this shell."/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Main bars">
+                <StackPanel Margin="10">
+                    <TextBlock FontWeight="Bold" Text="Main bars -- placeholder"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
+                               Text="Bar counts and layers per face, LD multipliers, the section 6.3 layer option, D_agg and O_spacer are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Stirrups">
+                <StackPanel Margin="10">
+                    <TextBlock FontWeight="Bold" Text="Stirrups -- placeholder"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
+                               Text="Dense/normal spacing and closure type (1, 2, 4 -- type 3 stays parked, A31) are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Crack bars">
+                <StackPanel Margin="10">
+                    <TextBlock FontWeight="Bold" Text="Crack bars -- placeholder"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
+                               Text="O_crack, s_max and the h &gt; 700 trigger (section 5) are implemented by issue #48 (U4). Nothing on this tab is read by Place yet."/>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Review">
+                <StackPanel Margin="10">
+                    <TextBlock FontWeight="Bold" Text="Review -- placeholder"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,10"
+                               Text="The derived placement list and the full section/6.2-6.4/7/8.2 report are implemented by issue #50 (U6). This shell only builds the transaction boundary: pressing Place opens ONE Transaction (A46), calls into placement, and rolls back entirely on any exception -- which is guaranteed right now, since placement itself is not implemented yet."/>
+                    <Button x:Name="place_btn" Content="Place" HorizontalAlignment="Left" Padding="18,6"/>
+                    <TextBlock x:Name="place_result_tb" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#FFB00000" Text=""/>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock x:Name="status_tb" Grid.Row="2" Margin="2,8,2,0"
+                   FontFamily="Consolas" Text="ready"/>
+    </Grid>
+</Window>

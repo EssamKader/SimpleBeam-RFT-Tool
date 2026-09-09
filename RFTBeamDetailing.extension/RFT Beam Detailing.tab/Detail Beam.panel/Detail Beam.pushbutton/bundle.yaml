@@ -1,0 +1,21 @@
+title: "Detail\nBeam"
+tooltip: >-
+  One command, five tabs: Beam & Materials, Main bars, Stirrups, Crack bars,
+  Review. The eventual replacement for "Place Main Bars", "Place Stirrups"
+  and "Place Crack Bars", which are STILL ON THE RIBBON and still work --
+  they stay until this window is verified on a live host (#55), so use them
+  meanwhile. A46/A47 consolidate the four pushbuttons into a single form so
+  bar-type selections are shared (the stirrup diameter that positions the
+  main bars is the same element that gets placed as the stirrup) and
+  everything is placed in ONE transaction, all-or-nothing.
+
+  This ticket (#46, U2) builds the shell only: the window, the five tabs,
+  the beam-pick flow (A35 -- dialog opens first, then the beam is picked),
+  and the transaction boundary. Tab CONTENTS (bar-type pickers, spacing
+  inputs, the live sketch, the Review-tab report) are #47/#48/#50 -- the
+  Place button currently refuses, naming those tickets, rather than
+  silently doing nothing.
+
+  See specs/ui-single-window.md, docs/spec-amendments.md (A35, A41, A42,
+  A46, A47, A48) and GitHub issue #46.
+author: Essam Kader
