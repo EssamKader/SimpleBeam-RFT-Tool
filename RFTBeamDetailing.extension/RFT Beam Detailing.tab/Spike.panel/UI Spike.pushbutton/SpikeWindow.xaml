@@ -1,0 +1,88 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RFT UI spike (#42) -- THROWAWAY"
+        Height="640" Width="940"
+        MinHeight="480" MinWidth="700"
+        WindowStartupLocation="CenterScreen"
+        SizeToContent="Manual">
+
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Margin="2,0,2,8" TextWrapping="Wrap"
+                   Text="Throwaway spike for issue #42. Proves the hosting only -- no detailing input, no validation, no placement. Nothing here ships."/>
+
+        <!-- The container with no precedent in pyRevit's own shipped XAML:
+             this is the single element the spike exists to prove. -->
+        <TabControl x:Name="tabs" Grid.Row="1">
+
+            <TabItem Header="Section sketch">
+                <Grid Margin="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock Text="Inputs (mm)" FontWeight="Bold" Margin="0,0,0,6"/>
+
+                        <TextBlock Text="Beam width (b)"/>
+                        <TextBox x:Name="b_tb" Text="300" Margin="0,2,0,8"/>
+
+                        <TextBlock Text="Beam depth (h)"/>
+                        <TextBox x:Name="h_tb" Text="900" Margin="0,2,0,8"/>
+
+                        <TextBlock Text="Cover"/>
+                        <TextBox x:Name="cover_tb" Text="25" Margin="0,2,0,8"/>
+
+                        <TextBlock Text="Stirrup diameter"/>
+                        <TextBox x:Name="stirrup_tb" Text="10" Margin="0,2,0,8"/>
+
+                        <TextBlock Text="Bottom bar diameter"/>
+                        <TextBox x:Name="bar_tb" Text="16" Margin="0,2,0,8"/>
+
+                        <TextBlock Text="Bottom bars in layer 1"/>
+                        <TextBox x:Name="count_tb" Text="4" Margin="0,2,0,12"/>
+
+                        <TextBlock TextWrapping="Wrap" FontStyle="Italic"
+                                   Text="Every dimension drawn comes from rft.core, per A48. Type in any box and the canvas redraws."/>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" BorderBrush="#FF808080" BorderThickness="1">
+                        <!-- ClipToBounds so an out-of-range input cannot paint
+                             over the rest of the window while proving nothing. -->
+                        <Canvas x:Name="section_canvas" Background="#FFFAFAFA"
+                                ClipToBounds="True"/>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Image probe">
+                <StackPanel Margin="10">
+                    <TextBlock FontWeight="Bold" Text="Relative bitmap path resolution"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,10"
+                               Text="No shipped pyRevit XAML anywhere references an Image Source, and wpf.LoadComponent has no pack:// base URI to resolve a relative path against. This tab reports what actually happens. The XAML-declared case is tested in a SEPARATE window (ImageProbe.xaml) so that a failure there cannot take down this one."/>
+                    <TextBlock x:Name="image_report" TextWrapping="Wrap"
+                               FontFamily="Consolas" Text="(probe has not run)"/>
+                    <TextBlock Text="Set from code, relative Uri:" Margin="0,10,0,2"/>
+                    <Image x:Name="probe_image" Width="64" Height="64"
+                           HorizontalAlignment="Left" Stretch="None"/>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="What this proves">
+                <ScrollViewer Margin="10" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="notes_block" TextWrapping="Wrap"
+                               FontFamily="Consolas"/>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <TextBlock x:Name="status" Grid.Row="2" Margin="2,8,2,0"
+                   FontFamily="Consolas" Text="ready"/>
+    </Grid>
+</Window>
