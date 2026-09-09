@@ -301,7 +301,11 @@ window opens, so "filled in" cannot mean "has values". The rule:
   - **Stirrups** — the `RebarHookType` selected. The hook is
     stirrup-exclusive, so it cannot be confused with the stirrup *bar type*,
     which Main bars also needs for its offsets.
-  - **Crack bars** — a crack `RebarBarType` selected **and** `h > 700`.
+  - **Crack bars** — a crack `RebarBarType` selected **and** `h > 700`
+    **and both faces detailed** (a layer count and a bar type on top *and*
+    bottom). §5.1's `H_avail` measures innermost-top to innermost-bottom, so
+    one face alone cannot produce it — **A50**. Review names the missing face
+    as the reason rather than computing `H_avail` from an assumed layer.
 - [ ] **Review states the derivation per section, in words** — "stirrups:
   will be placed", "crack bars: not requested (no crack bar type selected)".
   A derived decision the engineer cannot see is worse than a checkbox they
