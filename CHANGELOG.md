@@ -2,11 +2,16 @@
 
 All notable changes to the RFT Beam Detailing tool.
 
-**Nothing here is deployable yet.** A merge to `master` means the code
-exists; it does **not** mean it is safe to load. Only a tagged release should
-be loaded into a working Revit session, and no tag will be cut until a batch
-of closed tickets has been verified **against a live Revit host** — which has
-not yet happened for any of this work.
+**Nothing here is a release yet.** A merge to `master` means the code
+exists; it does **not** mean it is safe to load. Only a tagged commit should
+be loaded into a Revit session, never `master` HEAD.
+
+`v0.1.0-rc1` is a **release candidate cut in order to be tested**, not a
+release. It exists because the verification run itself needs something
+stable to install from, and installing the working tree would let an edit to
+`master` silently change what is loaded inside a running Revit session. It
+carries no claim that the buttons work. `v0.1.0` will be cut only if the
+candidate passes on a live host.
 
 ## Delivery model
 
@@ -14,22 +19,38 @@ This is a **pyRevit extension** — not a standalone application, and not a
 Revit `.addin` / compiled add-in. There is no installer, no `.sln`, no DLL to
 build, and none should be added.
 
-Deployment means pointing pyRevit at the extension folder:
+Deployment means registering, as a pyRevit extension search path, the
+folder that **contains** `RFTBeamDetailing.extension` — checked out at a
+**tagged commit**, never at whatever `master` happens to be:
 
 ```
-pyrevit extend <this repo>/RFTBeamDetailing.extension
+git worktree add <somewhere>/rft-<tag> <tag>
+pyrevit extensions paths add <somewhere>/rft-<tag>
 ```
 
-or registering the path via pyRevit's extension manager, then reloading
-pyRevit. Load from a **tagged commit**, never from whatever `master` happens
-to be at the time.
+then reload pyRevit. See `docs/deployment.md` for the full procedure and for
+why `pyrevit extend` — which this section previously named — is the wrong
+command: it clones a third-party extension from a git repo URL rather than
+registering a local folder.
 
 Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 `RFT Beam Detailing.tab/` → `Anchorage.panel/` → `*.pushbutton/script.py`,
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.1.0-rc1] — 2026-09-09
+
+First tagged commit in the project's history, cut from `baf9b7e` to give the
+live verification run a fixed thing to install. **Candidate, not a release**
+— see the note at the top of this file. Contents are everything listed under
+Added / Fixed / Decided below, which is the whole of the work to date: six
+detailing subsystems (S1–S7), the out-of-scope guards (S9), the pyRevit
+bundle metadata, and 45 spec amendments. 252 tests pass. Not yet verified:
+see Known risks, first entry.
+
 ## [Unreleased]
+
+Nothing. `master` and `v0.1.0-rc1` are the same tree.
 
 ### Added
 
@@ -216,9 +237,13 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 
 ### Known risks
 
-- **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
-  may be calling a non-existent API form; if so it throws on first real run.
-  Accepted deliberately, to be corrected on first live Revit test.
+- ~~**#23 — `RebarHostData` cover read-back shape is unverified.**~~
+  **Resolved, and the risk was real.** The live probe found that
+  `RebarFaceType` *does not exist* in Revit 2024 — all four pushbuttons
+  would have raised `AttributeError` on their first cover read. Replaced in
+  #30 by classifying exposed-face normals against the beam's own frame,
+  confirmed on a live host including a beam rotated 45° in plan
+  (`docs/verification/issue-30-cover-face-reads.md`).
 - **`Place Crack Bars` re-asks for the main bar layer counts.** A26's
   `H_avail` is measured to the innermost main bar layer, so the crack-bar
   run needs `layers_top` / `layers_btm` -- and nothing reads them back from
@@ -230,17 +255,26 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   its own, so `Place Main Bars` can position main bars against one stirrup
   type while `Place Stirrups` places another — nothing in a single run can
   detect that. Per-project persistence of these selections is #21 (S8).
-- **#25 — the stirrup hook angle read-back is unverified.** The fallback
-  defect is fixed and a non-180° hook is now blocked, but whether
-  `RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)` is the
-  real shape is unconfirmed. An unreadable angle is reported as UNVERIFIED
-  rather than treated as a pass.
+- ~~**#25 — the stirrup hook angle read-back is unverified.**~~
+  **Resolved.** `REBAR_HOOK_ANGLE` reads back live (in **radians**, and it
+  is writable), and `REBAR_HOOK_STYLE` distinguishes Standard (0) from
+  Stirrup/Tie (1). The probe also found the constraint that matters: a
+  Standard-family hook is rejected by `RebarStyle.StirrupTie` with an opaque
+  `InternalException` *whatever* its angle — so the guard checks family as
+  well as angle (A45; `docs/verification/issue-25-stirrup-hook-family-and-angle.md`).
 - **#26 — the A7 clearance has no defined failure behaviour.** The tool warns
   and places anyway, which is a placeholder chosen to avoid inventing a
   detailing rule, not an answer. Needs a decision.
-- No code in this project has ever been executed against a live Revit host.
-  Every API decision rests on documentation, and passing tests validate
-  adapter *logic* only — never API shape. See `CONTEXT.md`.
+- **The tool's own execution path has never run.** This is now the single
+  largest open risk, and it is what `v0.1.0-rc1` exists to test. Individual
+  API shapes *have* been confirmed against a live Revit 2024 host
+  (`RevitAPI 24.3.40.0`) — cover face reads, hook family and angle, the
+  z-datum, rotation — but every one of those probes was driven as **C#
+  through a connector**. Nothing has executed as **IronPython inside
+  pyRevit**, which means `pyrevit.forms.SelectFromList.show`'s signature,
+  `Rebar.CreateFromCurves` *as these scripts call it*, and the buttons'
+  end-to-end behaviour are all still unexercised. A green suite plus a live
+  API probe is not "the button works". See `CONTEXT.md`.
 
 ## Tickets closed
 
@@ -270,3 +304,5 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #28 | A43 section 6.4 clear-spacing datum |
 | #29 | A44 engineer-stated bars per layer |
 | #22 | S9 out-of-scope configuration guards |
+| #23 | Cover read-back API shape (superseded by #30) |
+| #24 | pyRevit bundle metadata and deployment doc |
