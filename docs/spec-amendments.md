@@ -103,6 +103,7 @@ currently says · **CONFIRM** = validates an existing placeholder unchanged.
 | A39 | — | Item **#2** (multi-span) → **still deferred**. Single-span remains the hard scope boundary. The tool should warn on, or refuse, a beam in a continuous run rather than silently detailing it as simply supported | #10 |
 | A40 | CHANGE | Item **#3** (stirrup leg formulas) → **CLOSED** per A30, **except** type 3's inner loop, which remains open and is why A31 parks type 3 | #10, #7 |
 | A41 | CHANGE | A39's "warn on, **or** refuse" latitude → **CLOSED in favour of REFUSE**, decided by the project owner 2026-09-08. A beam detected as part of a continuous run is refused outright, not warned, in every pushbutton — consistent with type 3's outright rejection (A31), and because the guard exists to prevent plausible-looking detailing for an unmodelled configuration | #22 |
+| A42 | CHANGE | **A35 superseded**: one `RebarBarType` selection per bar **ROLE** (top main, bottom main, stirrup, spacer, crack), not two per grade. In Revit a `RebarBarType` **is** a diameter, so two selections cannot express different top and bottom bar diameters. Bar diameter is therefore **derived from the selected type**, and the free-text diameter inputs are removed. Grade stops being a selection axis: A34's assignment becomes the **label** on each role's picker and a line in the report, not something inferred from the type. Decided by the project owner 2026-09-09 | #27 |
 
 ## Proposed new §10 — Implementation Constraints (Revit API)
 

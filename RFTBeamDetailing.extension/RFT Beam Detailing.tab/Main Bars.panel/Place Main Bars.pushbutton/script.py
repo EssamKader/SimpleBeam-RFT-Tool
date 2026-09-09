@@ -20,10 +20,16 @@ bar can therefore differ.
 SCOPE BOUNDARIES (see this ticket's report for the full rationale):
 - Spacer bars: only ``spacer_length_mm`` is computed and reported. Rev 2
   section 6.3 gives a length and no longitudinal spacing rule, so no
-  spacer bar is placed -- guessing one is prohibited by CONTEXT.md.
-- Steel-grade (RebarBarType) resolution is now S7's explicit, no-fallback
-  selection (issue #20): one high-tensile RebarBarType, picked from a
-  dropdown, used for both top and bottom bars (rev 2 section 1.1, A34).
+  spacer bar is placed -- guessing one is prohibited by CONTEXT.md. Ø_spacer
+  stays a typed input (A19: it is the CLEAR VERTICAL GAP between layers,
+  not a bar's own diameter, so it cannot be read off a RebarBarType).
+- Steel-grade (RebarBarType) resolution is A42's explicit, no-fallback,
+  ONE-SELECTION-PER-ROLE model (ticket #27, supersedes A35/S7's two-
+  selections-per-grade model): a top main bar type AND a separate bottom
+  main bar type, each picked from its own dropdown, so a Ø12 top bar and a
+  Ø16 bottom bar (both A34 high tensile) can coexist in one beam. Each
+  bar's diameter comes FROM its selected type -- there is no more free-text
+  Ø_TOP/Ø_BTM to reconcile it against.
 - "Place Bottom Bar.pushbutton" (S1) and "Place Stirrups.pushbutton" (S5)
   keep their original both-ends-supported assumption; only THIS pushbutton
   (already S3's, the one #15's ticket named) gets S2's full unsupported-
@@ -47,12 +53,14 @@ from rft.core.anchorage import (
     unsupported_end_straight_run_mm,
 )
 from rft.core.grades import (
-    GRADE_HIGH_TENSILE,
     ROLE_BOTTOM_MAIN,
+    ROLE_STIRRUP,
     ROLE_TOP_MAIN,
     bar_type_for_role,
-    diameter_consistency_message,
     missing_bar_type_selection_message,
+    role_grade_report_line,
+    role_picker_label,
+    stirrup_grade_conflict_message,
 )
 from rft.core.layout import (
     MAX_LAYERS,
@@ -117,19 +125,21 @@ BEAM_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
 BEAM_END_FACE_TYPE = DB.Structure.RebarFaceType.Other
 
 
-def select_high_tensile_bar_type(document):
-    """Explicit selection of the high-tensile St 36/52 RebarBarType used
-    for BOTH the top and bottom main bars (rev 2 section 1.1, A34/A35; S7,
-    issue #20) -- NO fallback to "the first one found". Returns None if
-    the document has no RebarBarType at all, or if the engineer cancels.
+def select_bar_type_for_role(document, role):
+    """Explicit per-role selection of a ``RebarBarType`` (rev 2 section
+    1.1, A42, ticket #27; supersedes A35/S7's issue #20 two-selections-
+    per-grade model) -- NO fallback to "the first one found". Returns
+    None if the document has no RebarBarType at all, or if the engineer
+    cancels the picker.
 
-    ONE selection covers both faces here because both roles map to the
-    SAME grade (A34): top main bars and bottom main bars are both high
-    tensile. See this ticket's report for the resulting tension when
-    Ø_TOP != Ø_BTM (the default 12/16 mm case) -- only one of the two
-    typed diameters can agree with a single selected type's own diameter,
-    surfaced by the diameter-consistency check below rather than resolved
-    here.
+    A SEPARATE selection for top and bottom main bars, even though both
+    map to the SAME A34 grade (high tensile): a ``RebarBarType`` is a
+    diameter in Revit, so a Ø12 top bar and a Ø16 bottom bar -- the
+    default 12/16 mm case, and the normal case generally -- need two
+    different type elements, not two grade slots. The picker's title
+    carries A34's required grade for this role (``role_picker_label``),
+    since grade can no longer be checked mechanically from the type
+    itself.
 
     SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
     docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
@@ -142,19 +152,13 @@ def select_high_tensile_bar_type(document):
         bar_types,
         multiselect=False,
         name_attr="Name",
-        title="Select high-tensile St 36/52 RebarBarType (top + bottom bars)",
+        title="Select RebarBarType -- {}".format(role_picker_label(role)),
         button_name="Select",
     )
 
 
 def ask_inputs():
     components = [
-        Label("Stirrup diameter O_stirrup (mm):"),
-        TextBox("dia_stirrup", Text="10"),
-        Label("Top bar diameter O_TOP (mm):"),
-        TextBox("dia_top", Text="12"),
-        Label("Bottom bar diameter O_BTM (mm):"),
-        TextBox("dia_btm", Text="16"),
         Label("Spacer diameter O_spacer (mm, clear gap between layers):"),
         TextBox("dia_spacer", Text="16"),
         Label("Max aggregate size D_agg (mm) -- required, no default (rev 2 §8.1 ships it blank):"),
@@ -220,9 +224,6 @@ def main():
         script.exit()
 
     values = ask_inputs()
-    dia_stirrup_mm = float(values["dia_stirrup"])
-    dia_top_mm = float(values["dia_top"])
-    dia_btm_mm = float(values["dia_btm"])
     dia_spacer_mm = float(values["dia_spacer"]) if values["dia_spacer"] else 16.0
 
     if not values["d_agg"]:
@@ -245,36 +246,75 @@ def main():
     ld_top_mult = float(values["ld_top_mult"]) if values["ld_top_mult"] else DEFAULT_LD_TOP_MULTIPLIER
     ld_btm_mult = float(values["ld_btm_mult"]) if values["ld_btm_mult"] else DEFAULT_LD_BTM_MULTIPLIER
 
-    # --- S7 (issue #20): explicit RebarBarType selection, no fallback ----
-    high_tensile_bar_type = select_high_tensile_bar_type(doc)
-    if high_tensile_bar_type is None:
+    # --- A42 (ticket #27, supersedes A35/S7): one explicit RebarBarType
+    # selection PER ROLE, no fallback -- top and bottom main bars each get
+    # their own picker (and so their own diameter) since a RebarBarType is
+    # a diameter in Revit and the two roles' diameters commonly differ.
+    top_bar_type_selected = select_bar_type_for_role(doc, ROLE_TOP_MAIN)
+    if top_bar_type_selected is None:
         forms.alert(
-            missing_bar_type_selection_message(GRADE_HIGH_TENSILE).message,
+            missing_bar_type_selection_message(ROLE_TOP_MAIN).message,
             title="RebarBarType selection required",
         )
         script.exit()
-    bar_type = bar_type_for_role(ROLE_TOP_MAIN, mild_bar_type=None, high_tensile_bar_type=high_tensile_bar_type)
+    top_bar_type = bar_type_for_role(ROLE_TOP_MAIN, top_bar_type_selected)
 
-    # --- this ticket's diameter-consistency trap: both Ø_TOP and Ø_BTM
-    # are checked against the ONE selected high-tensile type's own
-    # diameter -- since A34 assigns the SAME grade to both roles and A35
-    # nominates only one RebarBarType per grade, a beam with Ø_TOP !=
-    # Ø_BTM (the default 12/16 mm case) can only ever agree with one of
-    # them. Both are checked and reported rather than silently choosing a
-    # side -- see this ticket's report for why this is a surfaced spec
-    # tension, not a resolved one.
-    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
-    dia_mismatches = [
-        m for m in (
-            diameter_consistency_message("Top bar (Ø_TOP)", dia_top_mm, bar_type_dia_mm),
-            diameter_consistency_message("Bottom bar (Ø_BTM)", dia_btm_mm, bar_type_dia_mm),
-        ) if m is not None
-    ]
-    if dia_mismatches:
+    btm_bar_type_selected = select_bar_type_for_role(doc, ROLE_BOTTOM_MAIN)
+    if btm_bar_type_selected is None:
         forms.alert(
-            "\n\n".join(m.message for m in dia_mismatches),
-            title="Bar diameter does not match selected RebarBarType",
+            missing_bar_type_selection_message(ROLE_BOTTOM_MAIN).message,
+            title="RebarBarType selection required",
         )
+        script.exit()
+    btm_bar_type = bar_type_for_role(ROLE_BOTTOM_MAIN, btm_bar_type_selected)
+
+    # The stirrup type is selected here even though this pushbutton places
+    # NO stirrup: O_stirrup positions every main bar relative to the cage
+    # (§4's layer offsets, §6.1's corner-bar inset, §6.3's spacer length).
+    # Typing it instead would put the stirrup diameter back on two
+    # independent sources of truth -- type 10 here, place 12 mm stirrups
+    # from "Place Stirrups", and every main bar sits 2 mm off its true
+    # cover with nothing in the model showing it (issue #27 review). A42's
+    # whole point is that a diameter used in geometry comes from the type
+    # that will be placed.
+    stirrup_bar_type_selected = select_bar_type_for_role(doc, ROLE_STIRRUP)
+    if stirrup_bar_type_selected is None:
+        forms.alert(
+            missing_bar_type_selection_message(ROLE_STIRRUP).message,
+            title="RebarBarType selection required",
+        )
+        script.exit()
+    stirrup_bar_type = bar_type_for_role(ROLE_STIRRUP, stirrup_bar_type_selected)
+
+    # --- A42: each bar's diameter comes FROM its own selected type -- no
+    # free-text Ø_TOP/Ø_BTM/Ø_stirrup left to reconcile it against.
+    dia_top_mm = bar_type_diameter_mm(top_bar_type, internal_to_mm)
+    dia_btm_mm = bar_type_diameter_mm(btm_bar_type, internal_to_mm)
+    dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+
+    top_bar_type_name = getattr(top_bar_type, "Name", "")
+    btm_bar_type_name = getattr(btm_bar_type, "Name", "")
+    stirrup_bar_type_name = getattr(stirrup_bar_type, "Name", "")
+
+    # --- A42 (ticket #27) mechanical grade-conflict guard, run IN-RUN:
+    # this pushbutton now holds the stirrup selection and both high-tensile
+    # selections at once, so the comparison the guard needs is available
+    # here directly -- one element cannot be both mild St 24/35 and high
+    # tensile St 36/52. Compared by element id, never by name.
+    conflicts = [
+        c for c in (
+            stirrup_grade_conflict_message(
+                getattr(stirrup_bar_type, "Id", None), stirrup_bar_type_name,
+                getattr(top_bar_type, "Id", None), top_bar_type_name, ROLE_TOP_MAIN,
+            ),
+            stirrup_grade_conflict_message(
+                getattr(stirrup_bar_type, "Id", None), stirrup_bar_type_name,
+                getattr(btm_bar_type, "Id", None), btm_bar_type_name, ROLE_BOTTOM_MAIN,
+            ),
+        ) if c is not None
+    ]
+    if conflicts:
+        forms.alert("\n\n".join(c.message for c in conflicts), title="Stirrup/main bar grade conflict")
         script.exit()
 
     try:
@@ -446,6 +486,12 @@ def main():
             warnings.append(w)
 
     output.print_md("### S2/S3 -- computed cross-section layout and end anchorage (rev 2 §2, §4, §4.1, §6.1, §6.3)")
+    output.print_md("- " + role_grade_report_line(ROLE_TOP_MAIN, top_bar_type_name))
+    output.print_md("- " + role_grade_report_line(ROLE_BOTTOM_MAIN, btm_bar_type_name))
+    output.print_md(
+        "- " + role_grade_report_line(ROLE_STIRRUP, stirrup_bar_type_name)
+        + " (positions the main bars; no stirrup is placed by this pushbutton)"
+    )
     output.print_md(
         "- b = {:.1f} mm, h = {:.1f} mm, cover_top = {:.1f} mm, cover_btm = {:.1f} mm, "
         "cover_side = {:.1f} mm, cover_end = {:.1f} mm, O_stirrup = {:.1f} mm".format(
@@ -550,7 +596,7 @@ def main():
     du_internal, dv_internal = beam_section_centre_offsets(beam, start_pt)
 
     def _place_face(layer_offsets_mm, u_positions_mm, bend_direction, is_top,
-                     a_start_mm, b_start_mm, a_end_mm, b_end_mm):
+                     a_start_mm, b_start_mm, a_end_mm, b_end_mm, face_bar_type):
         placed = []
         a_start_internal = mm_to_internal(a_start_mm) if is_supported_start else cover_end_internal
         a_end_internal = mm_to_internal(a_end_mm) if is_supported_end else cover_end_internal
@@ -585,18 +631,18 @@ def main():
                 )
                 curves = build_main_bar_curves(corner_start, corner_end, bend_direction, bend_start, bend_end)
                 norm = bend_plane_normal(axis, bend_direction)
-                placed.append(place_anchored_bar(doc, beam, bar_type, curves, norm))
+                placed.append(place_anchored_bar(doc, beam, face_bar_type, curves, norm))
         return placed
 
     def do_place():
         placed = []
         placed += _place_face(
             btm_layer_offsets_mm, btm_u_positions_mm, v_dir, False,
-            a_btm_start_mm, b_btm_start_mm, a_btm_end_mm, b_btm_end_mm,
+            a_btm_start_mm, b_btm_start_mm, a_btm_end_mm, b_btm_end_mm, btm_bar_type,
         )
         placed += _place_face(
             top_layer_offsets_mm, top_u_positions_mm, v_dir.Negate(), True,
-            a_top_start_mm, b_top_start_mm, a_top_end_mm, b_top_end_mm,
+            a_top_start_mm, b_top_start_mm, a_top_end_mm, b_top_end_mm, top_bar_type,
         )
         return placed
 

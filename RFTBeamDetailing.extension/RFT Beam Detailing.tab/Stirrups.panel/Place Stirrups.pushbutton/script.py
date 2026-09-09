@@ -14,13 +14,13 @@ from pyrevit import DB, forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.grades import (
-    GRADE_MILD,
     ROLE_STIRRUP,
     bar_type_for_role,
-    diameter_consistency_message,
     hook_angle_guard_message,
     missing_bar_type_selection_message,
     missing_hook_type_selection_message,
+    role_grade_report_line,
+    role_picker_label,
 )
 from rft.core.guards import no_support_detected_message, stirrup_type3_guard_message
 from rft.core.stirrups import (
@@ -42,7 +42,12 @@ from rft.revit.geometry import (
     point_at_cc_offset,
     span_length_mm,
 )
-from rft.revit.bar_types import bar_type_diameter_mm, hook_angle_deg, list_bar_types, list_hook_types
+from rft.revit.bar_types import (
+    bar_type_diameter_mm,
+    hook_angle_deg,
+    list_bar_types,
+    list_hook_types,
+)
 from rft.revit.guards import continuous_run_guard
 from rft.revit.host import HostValidationError, validate_rebar_host
 from rft.revit.placement import bend_plane_normal, run_in_transaction
@@ -53,11 +58,14 @@ output = script.get_output()
 doc = revit.doc
 
 
-def select_mild_bar_type(document):
-    """Explicit selection of the mild St 24/35 RebarBarType used for
-    stirrups (rev 2 section 7.3, section 1.1, A34/A35; S7, issue #20) --
-    NO fallback to "the first one found". Returns None if the document has
-    no RebarBarType at all, or if the engineer cancels the picker.
+def select_bar_type_for_role(document, role):
+    """Explicit per-role selection of a ``RebarBarType`` (rev 2 section
+    1.1, A42, ticket #27; supersedes A35/S7's issue #20 model) -- NO
+    fallback to "the first one found". Returns None if the document has
+    no RebarBarType at all, or if the engineer cancels the picker. The
+    picker's title carries A34's required grade for this role
+    (``role_picker_label``), since grade can no longer be checked
+    mechanically from the type itself.
 
     SHAPE UNVERIFIED -- see "Place Bottom Bar.pushbutton"'s identical
     docstring for ``pyrevit.forms.SelectFromList.show``'s unconfirmed
@@ -70,7 +78,7 @@ def select_mild_bar_type(document):
         bar_types,
         multiselect=False,
         name_attr="Name",
-        title="Select mild St 24/35 RebarBarType (stirrups)",
+        title="Select RebarBarType -- {}".format(role_picker_label(role)),
         button_name="Select",
     )
 
@@ -107,8 +115,6 @@ def ask_inputs():
     components = [
         Label("Cover (mm):"),
         TextBox("cover", Text="25"),
-        Label("Stirrup diameter O_stirrup (mm):"),
-        TextBox("dia_stirrup", Text="10"),
         Label("Dense spacing, supports (mm, maximum):"),
         TextBox("dense_spacing", Text="150"),
         Label("Normal spacing, midspan (mm, maximum):"),
@@ -137,33 +143,40 @@ def main():
 
     values = ask_inputs()
     cover_mm = float(values["cover"])
-    dia_stirrup_mm = float(values["dia_stirrup"])
     dense_spacing_mm = float(values["dense_spacing"])
     normal_spacing_mm = float(values["normal_spacing"])
     closure_type = int(values["closure_type"])
 
-    # --- S7 (issue #20): explicit RebarBarType/RebarHookType selection,
-    # no fallback ----------------------------------------------------------
-    mild_bar_type = select_mild_bar_type(doc)
-    if mild_bar_type is None:
+    # --- A42 (ticket #27, supersedes A35/S7): one explicit per-role
+    # RebarBarType selection, no fallback ---------------------------------
+    stirrup_bar_type_selected = select_bar_type_for_role(doc, ROLE_STIRRUP)
+    if stirrup_bar_type_selected is None:
         forms.alert(
-            missing_bar_type_selection_message(GRADE_MILD).message,
+            missing_bar_type_selection_message(ROLE_STIRRUP).message,
             title="RebarBarType selection required",
         )
         script.exit()
-    bar_type = bar_type_for_role(ROLE_STIRRUP, mild_bar_type=mild_bar_type, high_tensile_bar_type=None)
+    bar_type = bar_type_for_role(ROLE_STIRRUP, stirrup_bar_type_selected)
 
     hook_type = select_hook_type(doc)
     if hook_type is None:
         forms.alert(missing_hook_type_selection_message().message, title="RebarHookType selection required")
         script.exit()
 
-    # --- this ticket's diameter-consistency trap -------------------------
-    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
-    dia_mismatch = diameter_consistency_message("Stirrup (Ø_stirrup)", dia_stirrup_mm, bar_type_dia_mm)
-    if dia_mismatch:
-        forms.alert(dia_mismatch.message, title="Bar diameter does not match selected RebarBarType")
-        script.exit()
+    # --- A42: the stirrup diameter comes FROM the selected type -- there
+    # is no free-text Ø_stirrup to reconcile it against any more.
+    dia_stirrup_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
+
+    stirrup_bar_type_id = getattr(bar_type, "Id", None)
+    stirrup_bar_type_name = getattr(bar_type, "Name", "")
+
+    # No mechanical grade-conflict guard here: this run holds only the mild
+    # stirrup selection, with no high-tensile selection to compare it
+    # against. The guard lives in "Place Main Bars", which holds all three
+    # selections at once. Reading the beam's already-placed rebar to
+    # compare across runs was tried and removed (issue #27 review): it
+    # rested on an unconfirmed `Rebar.GetHostId()` and failed OPEN, so it
+    # would have looked like a guard while protecting nothing.
 
     # --- issue #25: read back the selected hook's own angle where
     # possible and BLOCK if it is not 180 degrees. If it cannot be read
@@ -256,6 +269,7 @@ def main():
             script.exit()
 
     output.print_md("### S5 -- computed stirrup geometry and distribution (rev 2 §3, §7)")
+    output.print_md("- " + role_grade_report_line(ROLE_STIRRUP, stirrup_bar_type_name))
     output.print_md(
         "- CENTRELINE rectangle = {:.1f} x {:.1f} mm (b={:.1f}, h={:.1f}, "
         "Cover={:.1f}, O_stirrup={:.1f})".format(width_mm, height_mm, b_mm, h_mm, cover_mm, dia_stirrup_mm)

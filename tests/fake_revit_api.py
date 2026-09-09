@@ -67,11 +67,13 @@ Currently ``SHAPE UNVERIFIED``:
   place it is relied on for a second framing element, and that has not been
   confirmed against a live host either -- see
   ``rft/revit/guards.py:neighbour_axis_dot_product``.
-- ``RebarBarType.BarNominalDiameter`` (issue #20, S7) -- assumed to be a
-  read-only property in internal units carrying the catalog/nominal bar
-  diameter. Documentation also lists ``BarModelDiameter`` as a plausible
-  alternative; not confirmed against a live host which one the diameter
-  cross-check should read. See ``rft/revit/bar_types.py``.
+- ``RebarBarType.BarNominalDiameter`` (issue #20, S7; more load-bearing
+  since A42/ticket #27 made it the SOLE diameter source, not one side of a
+  cross-check) -- assumed to be a read-only property in internal units
+  carrying the catalog/nominal bar diameter. Documentation also lists
+  ``BarModelDiameter`` as a plausible alternative; not confirmed against a
+  live host which one every downstream mm computation should read. See
+  ``rft/revit/bar_types.py``.
 - ``RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)
   .AsDouble()`` (issue #25) -- assumed to return the hook's own angle in
   RADIANS. Whether this parameter exists on ``RebarHookType`` at all, and

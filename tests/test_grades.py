@@ -1,7 +1,8 @@
-"""Pure-core tests for rft.core.grades (S7, issue #20): the role -> grade
-assignment (rev 2 section 1.1, A34), the no-fallback explicit-selection
-guards, the 180-degree hook-angle check (issue #25), and the diameter
-consistency cross-check (this ticket's named trap).
+"""Pure-core tests for rft.core.grades (S7, issue #20; reworked for A42,
+ticket #27): the role -> grade assignment (rev 2 section 1.1, A34), the
+per-role picker label, the no-fallback explicit-selection guards, the
+180-degree hook-angle check (issue #25), and the stirrup/high-tensile
+grade-conflict guard A42 introduces.
 """
 
 import pytest
@@ -16,11 +17,13 @@ from rft.core.grades import (
     ROLE_STIRRUP,
     ROLE_TOP_MAIN,
     bar_type_for_role,
-    diameter_consistency_message,
     grade_for_role,
     hook_angle_guard_message,
     missing_bar_type_selection_message,
     missing_hook_type_selection_message,
+    role_grade_report_line,
+    role_picker_label,
+    stirrup_grade_conflict_message,
 )
 
 
@@ -47,7 +50,9 @@ def test_spacer_bars_are_high_tensile_applied_literally_per_a34():
     """The spacer row is the literal, deliberate reading of A34 -- not a
     'mild is more realistic' correction. This test exists specifically so
     a future edit that 'fixes' the spacer grade back to mild breaks a
-    named, commented test, not just an unnoticed data row."""
+    named, commented test, not just an unnoticed data row. A42 does not
+    place a spacer bar (no picker exists for that role either), so the
+    row stays for when that lands -- see rft.core.grades module docstring."""
     assert grade_for_role(ROLE_SPACER) == GRADE_HIGH_TENSILE
 
 
@@ -62,46 +67,74 @@ def test_grade_for_role_raises_for_unknown_role():
         grade_for_role("some role not in the spec")
 
 
+# --- role_picker_label (A42): built from ROLE_GRADE, never drifts --------
+
+
+def test_role_picker_label_names_role_and_its_required_grade():
+    label = role_picker_label(ROLE_BOTTOM_MAIN)
+    assert "Bottom main bars" in label
+    assert GRADE_HIGH_TENSILE in label
+
+
+def test_role_picker_label_for_stirrups_names_mild_grade():
+    label = role_picker_label(ROLE_STIRRUP)
+    assert "Stirrups" in label
+    assert GRADE_MILD in label
+
+
+def test_role_picker_label_covers_every_role_in_role_grade():
+    """A future role added to ROLE_GRADE must not crash the label builder
+    -- catches a label/mapping drift at the same time a role is added."""
+    for role in ROLE_GRADE:
+        label = role_picker_label(role)
+        assert ROLE_GRADE[role] in label
+
+
+# --- role_grade_report_line (A42): report line names type used + required grade
+
+
+def test_role_grade_report_line_names_bar_type_and_required_grade():
+    line = role_grade_report_line(ROLE_TOP_MAIN, "High Tensile 12mm")
+    assert "High Tensile 12mm" in line
+    assert GRADE_HIGH_TENSILE in line
+    assert "Top main bars" in line
+
+
 # --- bar_type_for_role: no fallback, missing selection is a hard error ---
 
 
-def test_bar_type_for_role_returns_the_mild_selection_for_stirrups():
-    mild, high = object(), object()
-    assert bar_type_for_role(ROLE_STIRRUP, mild, high) is mild
+def test_bar_type_for_role_returns_the_selected_type():
+    selected = object()
+    assert bar_type_for_role(ROLE_STIRRUP, selected) is selected
 
 
-def test_bar_type_for_role_returns_the_high_tensile_selection_for_top_bars():
-    mild, high = object(), object()
-    assert bar_type_for_role(ROLE_TOP_MAIN, mild, high) is high
+def test_bar_type_for_role_returns_the_selected_type_for_any_role():
+    selected = object()
+    assert bar_type_for_role(ROLE_TOP_MAIN, selected) is selected
+    assert bar_type_for_role(ROLE_BOTTOM_MAIN, selected) is selected
 
 
-def test_bar_type_for_role_returns_the_high_tensile_selection_for_spacer_bars():
-    mild, high = object(), object()
-    assert bar_type_for_role(ROLE_SPACER, mild, high) is high
-
-
-def test_bar_type_for_role_raises_when_required_grade_not_supplied():
+def test_bar_type_for_role_raises_when_no_selection_supplied():
     """A missing explicit selection is a BLOCKING error, never a silent
-    fallback to the other grade or to None reaching the Revit API."""
+    fallback to None reaching the Revit API."""
     with pytest.raises(ValueError, match="No RebarBarType selected"):
-        bar_type_for_role(ROLE_STIRRUP, mild_bar_type=None, high_tensile_bar_type=object())
-
-
-def test_bar_type_for_role_does_not_care_about_the_unused_slot():
-    """A role needing high tensile must not be blocked by a missing mild
-    selection it never uses."""
-    high = object()
-    assert bar_type_for_role(ROLE_TOP_MAIN, mild_bar_type=None, high_tensile_bar_type=high) is high
+        bar_type_for_role(ROLE_STIRRUP, None)
 
 
 # --- missing-selection guard messages ------------------------------------
 
 
-def test_missing_bar_type_selection_message_names_the_grade_and_spec_section():
-    guard = missing_bar_type_selection_message(GRADE_MILD)
-    assert GRADE_MILD in guard.message
+def test_missing_bar_type_selection_message_names_the_role_label_and_spec_section():
+    guard = missing_bar_type_selection_message(ROLE_BOTTOM_MAIN)
+    assert "Bottom main bars" in guard.message
+    assert GRADE_HIGH_TENSILE in guard.message
     assert "1.1" in guard.spec_section
-    assert "A35" in guard.spec_section
+    assert "A42" in guard.spec_section
+
+
+def test_missing_bar_type_selection_message_for_stirrups_names_mild_grade():
+    guard = missing_bar_type_selection_message(ROLE_STIRRUP)
+    assert GRADE_MILD in guard.message
 
 
 def test_missing_hook_type_selection_message_names_180_degrees_and_issue_25():
@@ -138,27 +171,42 @@ def test_hook_angle_guard_blocks_a_135_degree_hook():
     assert guard is not None
 
 
-# --- diameter consistency (this ticket's named trap) ---------------------
+# --- stirrup_grade_conflict_message (A42, ticket #27) --------------------
 
 
-def test_diameter_consistency_passes_on_exact_match():
-    assert diameter_consistency_message("Bottom bar", 16.0, 16.0) is None
-
-
-def test_diameter_consistency_passes_within_tolerance():
-    assert diameter_consistency_message("Bottom bar", 16.0, 16.3) is None
-
-
-def test_diameter_consistency_blocks_on_mismatch():
-    guard = diameter_consistency_message("Bottom bar (O_BTM)", 16.0, 20.0)
+def test_stirrup_grade_conflict_message_blocks_on_matching_element_id():
+    guard = stirrup_grade_conflict_message(
+        stirrup_type_id=7, stirrup_type_name="St 24/35 Ø10",
+        other_type_id=7, other_type_name="St 24/35 Ø10",
+        other_role="top main bars",
+    )
     assert guard is not None
-    assert "16.0" in guard.message
-    assert "20.0" in guard.message
-    assert "Bottom bar (O_BTM)" in guard.condition
+    assert "top main bars" in guard.message
+    assert "A34" in guard.message
 
 
-def test_diameter_consistency_exact_boundary_of_tolerance_passes():
-    """0.5 mm is the tolerance itself -- exactly at the boundary must still
-    pass, not be treated as a violation by a strict '<' vs '<=' slip."""
-    guard = diameter_consistency_message("Stirrup", 10.0, 10.5)
-    assert guard is None
+def test_stirrup_grade_conflict_message_passes_on_different_element_ids():
+    assert stirrup_grade_conflict_message(
+        stirrup_type_id=7, stirrup_type_name="St 24/35 Ø10",
+        other_type_id=9, other_type_name="St 36/52 Ø16",
+        other_role="bottom main bars",
+    ) is None
+
+
+def test_stirrup_grade_conflict_message_ignores_equal_names_different_ids():
+    """Compared by element id, never by name (A42's explicit instruction)
+    -- two differently-graded types sharing a display name in a badly kept
+    office template must NOT be flagged as a conflict."""
+    assert stirrup_grade_conflict_message(
+        stirrup_type_id=7, stirrup_type_name="Rebar Type A",
+        other_type_id=9, other_type_name="Rebar Type A",
+        other_role="bottom main bars",
+    ) is None
+
+
+def test_stirrup_grade_conflict_message_passes_when_nothing_to_compare_yet():
+    assert stirrup_grade_conflict_message(
+        stirrup_type_id=7, stirrup_type_name="St 24/35 Ø10",
+        other_type_id=None, other_type_name="",
+        other_role="bottom main bars",
+    ) is None

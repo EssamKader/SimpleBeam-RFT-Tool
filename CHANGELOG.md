@@ -127,6 +127,18 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
   tensile St 36/52** for all other bars.
 - **Stirrup type 3 parked**, narrowing the type input to (1, 2, 4), because
   its inner loop has no defined dimensions.
+- **Per-role bar types (A42, #27): one `RebarBarType` selection per bar
+  role, and the diameter comes from the selected type.** A Revit
+  `RebarBarType` *is* a diameter, so A35's two selections could not express
+  a Ø12 top bar and a Ø16 bottom bar — the normal case. The free-text
+  `Ø_TOP` / `Ø_BTM` / `Ø_stirrup` inputs are gone, along with the
+  diameter cross-check they needed. `Ø_spacer` stays typed, since A19
+  defines it as the clear *gap* between layers rather than a bar diameter.
+  Grade can no longer be inferred from a type, so A34's assignment is now
+  the label on each role's picker and a line in the report; the one
+  mechanical check — the stirrup type must not be the same element as a
+  main-bar type — runs in `Place Main Bars`, which holds all three
+  selections at once.
 - **Steel grades (S7, #20): every bar type is now an explicit selection, and
   nothing falls back.** The §1.1/A34 role→grade mapping lives in
   `rft/core/grades.py` as data — stirrups mild St 24/35, everything else
@@ -161,13 +173,10 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 - **#23 — `RebarHostData` cover read-back shape is unverified.** The adapter
   may be calling a non-existent API form; if so it throws on first real run.
   Accepted deliberately, to be corrected on first live Revit test.
-- **#27 — A35's two bar-type selections cannot express different top and
-  bottom diameters.** In Revit a `RebarBarType` *is* a diameter, so one
-  high-tensile selection cannot place a Ø12 top bar and a Ø16 bottom bar.
-  Until this is decided, the tool details only beams whose top and bottom
-  main bars share a diameter — it refuses loudly rather than placing
-  wrong-diameter bars, but different top and bottom diameters is the normal
-  case, so this is the sharpest limitation in the tool today.
+- **Bar-type selections are not shared between pushbuttons.** Each run picks
+  its own, so `Place Main Bars` can position main bars against one stirrup
+  type while `Place Stirrups` places another — nothing in a single run can
+  detect that. Per-project persistence of these selections is #21 (S8).
 - **#25 — the stirrup hook angle read-back is unverified.** The fallback
   defect is fixed and a non-180° hook is now blocked, but whether
   `RebarHookType.get_Parameter(BuiltInParameter.REBAR_HOOK_ANGLE)` is the
@@ -199,4 +208,5 @@ plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 | #16 | S3 cross-section layout |
 | #18 | S5 stirrups |
 | #20 | S7 steel grades and bar type resolution |
+| #27 | A42 per-role bar type selection |
 | #22 | S9 out-of-scope configuration guards |

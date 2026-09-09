@@ -20,11 +20,11 @@ from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.anchorage import DEFAULT_LD_BTM_MULTIPLIER, bottom_bar_anchorage, development_length
 from rft.core.grades import (
-    GRADE_HIGH_TENSILE,
     ROLE_BOTTOM_MAIN,
     bar_type_for_role,
-    diameter_consistency_message,
     missing_bar_type_selection_message,
+    role_grade_report_line,
+    role_picker_label,
 )
 from rft.core.guards import no_support_detected_message
 from rft.revit.bar_types import bar_type_diameter_mm, list_bar_types
@@ -63,11 +63,13 @@ doc = revit.doc
 SUPPORT_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
 
 
-def select_high_tensile_bar_type(document):
-    """Explicit selection of the high-tensile St 36/52 RebarBarType used
-    for the bottom main bar (rev 2 section 1.1, A34/A35; S7, issue #20) --
-    NO fallback to "the first one found". Returns None if the document has
-    no RebarBarType at all, or if the engineer cancels the picker.
+def select_bar_type_for_role(document, role):
+    """Explicit per-role selection of a ``RebarBarType`` (rev 2 section
+    1.1, A42; S7/#20, superseded by #27) -- NO fallback to "the first one
+    found". Returns None if the document has no RebarBarType at all, or if
+    the engineer cancels the picker. The picker's title carries A34's
+    required grade for this role (``role_picker_label``), since grade can
+    no longer be checked mechanically from the type itself.
 
     SHAPE UNVERIFIED -- ``pyrevit.forms.SelectFromList.show(items,
     multiselect=False, name_attr=..., title=..., button_name=...)`` is the
@@ -83,15 +85,13 @@ def select_high_tensile_bar_type(document):
         bar_types,
         multiselect=False,
         name_attr="Name",
-        title="Select high-tensile St 36/52 RebarBarType (bottom bar)",
+        title="Select RebarBarType -- {}".format(role_picker_label(role)),
         button_name="Select",
     )
 
 
 def ask_inputs():
     components = [
-        Label("Bottom bar diameter Ø_BTM (mm):"),
-        TextBox("dia_btm", Text="16"),
         Label("LD_btm multiplier (x diameter, default {}, assumes St 36/52):".format(
             int(DEFAULT_LD_BTM_MULTIPLIER)
         )),
@@ -117,27 +117,33 @@ def main():
         script.exit()
 
     values = ask_inputs()
-    dia_btm_mm = float(values["dia_btm"])
     ld_mult = float(values["ld_mult"]) if values["ld_mult"] else DEFAULT_LD_BTM_MULTIPLIER
 
-    # --- S7 (issue #20): explicit RebarBarType selection, no fallback ----
-    high_tensile_bar_type = select_high_tensile_bar_type(doc)
-    if high_tensile_bar_type is None:
+    # --- A42 (ticket #27, supersedes A35/S7): one explicit per-role
+    # RebarBarType selection, no fallback -----------------------------
+    bottom_bar_type = select_bar_type_for_role(doc, ROLE_BOTTOM_MAIN)
+    if bottom_bar_type is None:
         forms.alert(
-            missing_bar_type_selection_message(GRADE_HIGH_TENSILE).message,
+            missing_bar_type_selection_message(ROLE_BOTTOM_MAIN).message,
             title="RebarBarType selection required",
         )
         script.exit()
-    bar_type = bar_type_for_role(ROLE_BOTTOM_MAIN, mild_bar_type=None, high_tensile_bar_type=high_tensile_bar_type)
+    bar_type = bar_type_for_role(ROLE_BOTTOM_MAIN, bottom_bar_type)
 
-    # --- this ticket's diameter-consistency trap: the typed O_BTM must
-    # agree with the selected type's own diameter, or LD/anchorage below
-    # would be computed against the wrong number with nothing showing it.
-    bar_type_dia_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
-    dia_mismatch = diameter_consistency_message("Bottom bar (Ø_BTM)", dia_btm_mm, bar_type_dia_mm)
-    if dia_mismatch:
-        forms.alert(dia_mismatch.message, title="Bar diameter does not match selected RebarBarType")
-        script.exit()
+    # --- A42: the bottom bar's diameter comes FROM the selected type --
+    # there is no free-text Ø_BTM to reconcile it against any more.
+    dia_btm_mm = bar_type_diameter_mm(bar_type, internal_to_mm)
+
+    # --- A42 (ticket #27) mechanical grade-conflict guard: the selected
+    # type must not be the SAME element as a stirrup type already placed
+    # on this beam (a prior "Place Stirrups" run) -- one element cannot be
+    # both grades. Compared by element id, never by name.
+    bottom_bar_type_id = getattr(bar_type, "Id", None)
+    bottom_bar_type_name = getattr(bar_type, "Name", "")
+    # No mechanical grade-conflict guard here: this tracer pushbutton holds
+    # only the bottom-bar selection, with no stirrup selection to compare
+    # it against. The guard lives in "Place Main Bars", which holds all
+    # three selections at once (issue #27 review).
 
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)
     start_pt, end_pt = beam_endpoints(beam)
@@ -195,6 +201,7 @@ def main():
         script.exit()
 
     output.print_md("### S1 tracer bullet -- computed anchorage (rev 2 §2.2/§2.3)")
+    output.print_md("- " + role_grade_report_line(ROLE_BOTTOM_MAIN, bottom_bar_type_name))
     output.print_md("- b = {:.1f} mm, h = {:.1f} mm, L (c/c) = {:.1f} mm".format(b_mm, h_mm, l_mm))
     output.print_md("- LD_btm = {} x {:.1f} = {:.1f} mm".format(ld_mult, dia_btm_mm, ld_btm_mm))
     output.print_md(

@@ -1,14 +1,17 @@
 """Adapter layer for ``RebarBarType``/``RebarHookType`` enumeration and
-read-back (S7, issue #20; hook-angle read-back, issue #25).
+read-back (S7, issue #20; hook-angle read-back, issue #25; A42 per-role
+selection and grade-conflict guard, issue #27).
 
-Rev 2 section 1.1 (A34/A35): the mild and high-tensile ``RebarBarType``s
-are chosen by the engineer via an EXPLICIT dropdown/list selection --
-never inferred from the document by name-matching or a "first available"
-fallback. That selection UI lives in each pushbutton's own script.py
-(mirroring where ``ask_inputs`` already lives); this module only
-enumerates the document's available types for that picker, and reads back
-the two properties this ticket needs: a bar type's own diameter (the
-diameter-consistency cross-check) and a hook type's own angle (issue #25).
+Rev 2 section 1.1 (A34, A42): one ``RebarBarType`` is chosen per bar ROLE
+by the engineer via an EXPLICIT dropdown/list selection -- never inferred
+from the document by name-matching or a "first available" fallback. That
+selection UI lives in each pushbutton's own script.py (mirroring where
+``ask_inputs`` already lives); this module only enumerates the document's
+available types for that picker, and reads back the properties this
+ticket needs: a bar type's own diameter (now the single source of truth
+for every downstream mm computation, A42), a hook type's own angle (issue
+#25), and -- for the A42 stirrup/high-tensile grade-conflict guard -- the
+``RebarBarType``s already used by Rebar previously placed on a given host.
 
 SHAPE UNVERIFIED -- nothing here has been confirmed against a live Revit
 host. See each function's docstring and tests/fake_revit_api.py's header
@@ -18,13 +21,13 @@ for the running list.
 import math
 
 from Autodesk.Revit.DB import FilteredElementCollector
-from Autodesk.Revit.DB.Structure import RebarBarType, RebarHookType
+from Autodesk.Revit.DB.Structure import Rebar, RebarBarType, RebarHookType, RebarStyle
 
 
 def list_bar_types(document):
     """All ``RebarBarType`` elements in the document, for the explicit
-    dropdown selection (rev 2 section 1.1, A35) -- no filtering, no
-    inference: the engineer picks from the full list.
+    per-role dropdown selection (rev 2 section 1.1, A42) -- no filtering,
+    no inference: the engineer picks from the full list.
     """
     return list(FilteredElementCollector(document).OfClass(RebarBarType))
 
@@ -37,24 +40,21 @@ def list_hook_types(document):
 
 
 def bar_type_diameter_mm(bar_type, from_internal_units):
-    """The selected ``RebarBarType``'s own diameter, in mm -- used to
-    cross-check against the free-text diameter inputs (this ticket's named
-    trap: a typed diameter that disagrees with the selected type's real
-    diameter would otherwise silently drive the wrong `LD`, layer offsets
-    and stirrup rectangle).
+    """The selected ``RebarBarType``'s own diameter, in mm -- since A42,
+    this is the SINGLE SOURCE OF TRUTH for the bar diameter used
+    everywhere downstream (`LD`, layer offsets, the stirrup rectangle, the
+    §2.2/A7 clearance): there is no longer a separate typed diameter input
+    to reconcile it against.
 
     SHAPE UNVERIFIED: assumes ``RebarBarType.BarNominalDiameter`` (the
-    catalog/nominal diameter -- matching what the spec's O_TOP / O_BTM /
-    O_stirrup inputs mean) is a read-only property in internal units.
+    catalog/nominal diameter) is a read-only property in internal units.
     Published Revit API documentation for ``RebarBarType`` also lists
     ``BarModelDiameter`` (the diameter used for modelling/clash geometry,
     which can differ slightly from the nominal catalog size) as a
     plausible alternative property; which of the two is the intended one
-    for this cross-check has not been confirmed against a live host. If
-    ``BarNominalDiameter`` turns out to be wrong, swap it for
-    ``BarModelDiameter`` here -- the cross-check policy itself
-    (``rft.core.grades.diameter_consistency_message``) does not change
-    either way.
+    has not been confirmed against a live host. If ``BarNominalDiameter``
+    turns out to be wrong, swap it for ``BarModelDiameter`` here -- no
+    caller of this function needs to change either way.
     """
     return from_internal_units(bar_type.BarNominalDiameter)
 

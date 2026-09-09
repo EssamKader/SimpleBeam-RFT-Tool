@@ -21,6 +21,7 @@ from fake_revit_api import (
     FakeXYZ,
 )
 
+from rft.core.anchorage import top_bar_anchorage
 from rft.revit.host import HostValidationError, read_face_cover_mm, validate_rebar_host
 from rft.revit.placement import (
     bar_face_points_at_uv,
@@ -625,3 +626,68 @@ def test_hook_angle_deg_returns_none_when_get_parameter_is_missing_entirely():
         pass
 
     assert hook_angle_deg(_NoParameterHookType()) is None
+
+
+# --- Issue #27 (A42): per-role RebarBarType resolution and reworked -------
+# --- Place Main Bars' diameter source, verified at the adapter boundary --
+
+
+def test_bar_type_diameter_mm_reads_top_and_bottom_types_independently():
+    """A42's whole point: a top RebarBarType and a bottom RebarBarType can
+    carry DIFFERENT diameters (the default 12/16 mm case) -- each read
+    independently through the same adapter function, no shared state."""
+    from rft.revit.bar_types import bar_type_diameter_mm
+
+    top_type = FakeRebarBarType(bar_nominal_diameter=12.0 / 304.8, name="High Tensile 12mm")
+    btm_type = FakeRebarBarType(bar_nominal_diameter=16.0 / 304.8, name="High Tensile 16mm")
+
+    dia_top_mm = bar_type_diameter_mm(top_type, from_internal_units=lambda v: v * 304.8)
+    dia_btm_mm = bar_type_diameter_mm(btm_type, from_internal_units=lambda v: v * 304.8)
+
+    assert dia_top_mm == pytest.approx(12.0)
+    assert dia_btm_mm == pytest.approx(16.0)
+
+
+def test_top_bar_anchorage_uses_the_bottom_bar_types_diameter_not_the_top_bar_types():
+    """The §2.2/A7 cross-dependency this ticket's instructions flagged by
+    name: `a_t = Support width - Cover - O_BTM` -- so the value threaded
+    into ``top_bar_anchorage`` after A42's rework must still be the
+    BOTTOM RebarBarType's own diameter (Ø16 here), never the TOP
+    RebarBarType's own diameter (Ø12) it is placed alongside. Proven by
+    showing the reworked call disagrees with what a same-diameter-both-
+    ways mistake would produce."""
+    from rft.revit.bar_types import bar_type_diameter_mm
+
+    top_type = FakeRebarBarType(bar_nominal_diameter=12.0 / 304.8, name="High Tensile 12mm")
+    btm_type = FakeRebarBarType(bar_nominal_diameter=16.0 / 304.8, name="High Tensile 16mm")
+
+    dia_top_mm = bar_type_diameter_mm(top_type, from_internal_units=lambda v: v * 304.8)
+    dia_btm_mm = bar_type_diameter_mm(btm_type, from_internal_units=lambda v: v * 304.8)
+
+    correct = top_bar_anchorage(
+        support_width_mm=300, support_cover_mm=25, bottom_bar_diameter_mm=dia_btm_mm, ld_top_mm=720
+    )
+    wrong_if_using_top_diameter = top_bar_anchorage(
+        support_width_mm=300, support_cover_mm=25, bottom_bar_diameter_mm=dia_top_mm, ld_top_mm=720
+    )
+
+    assert correct.a != pytest.approx(wrong_if_using_top_diameter.a)
+    # a_t = 300 - 25 - 16 = 259, capped by LD - 200 = 520 -- comfortably
+    # under the cap, so the formula value is what is actually built.
+    assert correct.a == pytest.approx(300 - 25 - dia_btm_mm)
+
+
+class _FakeDocGetElement(object):
+    """``FakeElementId`` defines ``__eq__`` but not ``__hash__`` (matching
+    plain equality semantics assumed for a real ``ElementId``), so this
+    looks up by equality over a list of pairs rather than a dict keyed by
+    id."""
+
+    def __init__(self, elements_by_id):
+        self._pairs = list(elements_by_id)
+
+    def GetElement(self, element_id):
+        for id_, element in self._pairs:
+            if id_ == element_id:
+                return element
+        return None
