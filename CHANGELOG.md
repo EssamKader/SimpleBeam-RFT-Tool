@@ -36,6 +36,56 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.2.0-rc5] — 2026-09-10
+
+Fixes the one defect rc4's live test found, and two tests that could never
+have found it.
+
+### Place died on an `AttributeError` (#56 follow-up)
+
+`_do_place` read `review.crack` while the field is `crack_bars`. Everything
+upstream worked — the derivation was right, the report printed, the
+transaction opened — and placement failed at the last step. The transaction
+rolled back, so nothing was placed and nothing was damaged, but a beam that
+should have been detailed was not.
+
+One word, and no test could reach it: `script.py` imports `pyrevit` and
+cannot be imported under CPython. The names are now compared as **text**
+against `ReviewDerivation._fields`, the same trick the `x:Name` cross-check
+uses.
+
+### Two guards were passing vacuously — the worse finding
+
+Writing that guard exposed it. Its own mutation test reported MISSED, and
+the cause was a literal **backspace byte** where a regex word boundary
+should have been: `` written into the file as the control character it
+denotes rather than as two characters. The pattern matched nothing, so the
+check passed — against the very defect it was written for.
+
+The same corruption was already sitting in rc2's modal-window guard, whose
+`show_dialog(` branch had therefore never matched anything. Its mutation
+test had passed only because the mutation happened to hit the *other*
+branch.
+
+Both are fixed, there is a control-character sweep, and the new guard
+asserts that it **matched something at all** — a text check that finds
+nothing is indistinguishable from one that finds nothing wrong unless it
+says which it is.
+
+A third guard was merely too coarse: it checked that `core_plan.` appeared
+somewhere in a method, which stayed true with one of several plan calls
+ripped out. It now names each required call.
+
+### `tools/prove_guards.py`
+
+The mutation prover is now part of the repo. Every text-based guard is
+reintroduced its own defect and must fail. **9 of 9 do — two of which did
+not before this release.**
+
+360 tests pass.
+
+---
+
 ## [v0.2.0-rc4] — 2026-09-10
 
 **The single window places reinforcement.** First candidate where Place is
