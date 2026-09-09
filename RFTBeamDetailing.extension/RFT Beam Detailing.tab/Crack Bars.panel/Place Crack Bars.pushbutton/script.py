@@ -32,7 +32,7 @@ SCOPE, per this ticket's brief:
   placing it.
 """
 
-from pyrevit import DB, forms, revit, script
+from pyrevit import forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.crack_bars import (
@@ -71,7 +71,7 @@ from rft.revit.geometry import (
     support_width_along_axis_mm,
 )
 from rft.revit.guards import continuous_run_guard
-from rft.revit.host import HostValidationError, read_face_cover_mm, read_support_cover_mm, validate_rebar_host
+from rft.revit.host import HostValidationError, read_beam_face_covers_mm, read_support_side_cover_mm, validate_rebar_host
 from rft.revit.placement import (
     bar_point_at_uv,
     bend_plane_normal,
@@ -85,15 +85,11 @@ from rft.revit.units import internal_to_mm, mm_to_internal
 output = script.get_output()
 doc = revit.doc
 
-# Same THREE-cover situation "Place Main Bars.pushbutton" documents, plus a
-# FOURTH here: the SUPPORTING element's own cover (rev 2 section 2.4, A8),
-# used for the crack bar's embedment (R2) -- distinct again from all three
-# beam-side covers below. See that pushbutton's module-level comment for
-# the shared SHAPE UNVERIFIED caveat on RebarFaceType/RebarHostData this
-# constant carries.
-SUPPORT_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
-BEAM_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
-BEAM_END_FACE_TYPE = DB.Structure.RebarFaceType.Other
+# Cover reads (issue #30) go through `read_beam_face_covers_mm` /
+# `read_support_side_cover_mm` -- see "Place Main Bars.pushbutton"'s
+# module-level comment for the shared FOUR-cover rationale. A fourth cover
+# beyond that pushbutton's three: the SUPPORTING element's own cover (rev 2
+# section 2.4, A8), used for the crack bar's embedment (R2).
 
 
 def select_bar_type_for_role(document, role):
@@ -230,30 +226,6 @@ def main():
         forms.alert("\n\n".join(c.message for c in conflicts), title="Stirrup/main bar grade conflict")
         script.exit()
 
-    # --- THREE beam-side covers, read once each, never substituted for one
-    # another (issue #16/S3 review; see "Place Main Bars.pushbutton"'s
-    # module comment for the full rationale):
-    #   cover_top/cover_btm -> H_avail (a VERTICAL quantity, section 5.1)
-    #   cover_side          -> A24's horizontal crack-bar inset
-    #   cover_end           -> the beam's own end-face cover, unsupported
-    #                          ends only (R2, mirroring section 2.5/A12)
-    try:
-        cover_top_mm = read_face_cover_mm(
-            host_data, DB.Structure.RebarFaceType.Top, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_btm_mm = read_face_cover_mm(
-            host_data, DB.Structure.RebarFaceType.Bottom, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_side_mm = read_face_cover_mm(
-            host_data, BEAM_SIDE_FACE_TYPE, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_end_mm = read_face_cover_mm(
-            host_data, BEAM_END_FACE_TYPE, doc, internal_to_mm, element_id=beam.Id
-        )
-    except HostValidationError as ex:
-        forms.alert(str(ex), title="Cover read-back failed")
-        script.exit()
-
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
@@ -283,6 +255,45 @@ def main():
             "n_crack_layers = 0. No crack/skin bars are placed.".format(h_mm, 700.0)
         )
         script.exit()
+
+    # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end.
+    # Moved ahead of the beam-side cover reads (issue #30): `cover_end` is
+    # only exposed as a face on an UNSUPPORTED end (`GetExposedFaces()`
+    # returns no end face at all on a supported beam), so requesting it
+    # must be conditional on knowing support status first.
+    support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
+    support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
+    is_supported_start = support_start is not None
+    is_supported_end = support_end is not None
+
+    # --- FOUR conceptually distinct covers (issue #30, replacing the
+    # nonexistent `RebarFaceType`; see "Place Main Bars.pushbutton"'s module
+    # comment for the full rationale), never substituted for one another:
+    #   cover_top/cover_btm -> H_avail (a VERTICAL quantity, section 5.1)
+    #   cover_side          -> A24's horizontal crack-bar inset
+    #   cover_end           -> the beam's own end-face cover, requested ONLY
+    #                          at whichever end is actually unsupported (R2,
+    #                          mirroring section 2.5/A12)
+    #   support_cover_*     -> the SUPPORTING element's own cover (A8),
+    #                          used for the embedment at a supported end
+    try:
+        beam_covers = read_beam_face_covers_mm(
+            beam, host_data, u_dir, v_dir, axis, internal_to_mm, element_id=beam.Id,
+            need_end_start=not is_supported_start, need_end_end=not is_supported_end,
+        )
+    except HostValidationError as ex:
+        forms.alert(str(ex), title="Cover read-back failed")
+        script.exit()
+
+    cover_top_mm = beam_covers.top_mm
+    cover_btm_mm = beam_covers.bottom_mm
+    cover_side_mm = beam_covers.side_mm
+    # Two SEPARATE end-face covers, each requested only where its own end is
+    # unsupported (issue #30) -- never collapsed into one value, since the
+    # two ends' end-face cover types are not guaranteed equal (unlike the
+    # two SIDE faces, `read_beam_face_covers_mm` does not assert this).
+    cover_end_start_mm = beam_covers.end_start_mm
+    cover_end_end_mm = beam_covers.end_end_mm
 
     # --- A26: H_avail measured to the INNERMOST main bar layer, i.e. the
     # LAST layer (layers_top / layers_btm), not layer 1.
@@ -325,7 +336,11 @@ def main():
     )
     output.print_md(
         "- cover_top = {:.1f} mm, cover_btm = {:.1f} mm, cover_side = {:.1f} mm, "
-        "cover_end = {:.1f} mm".format(cover_top_mm, cover_btm_mm, cover_side_mm, cover_end_mm)
+        "cover_end (start) = {}, cover_end (end) = {}".format(
+            cover_top_mm, cover_btm_mm, cover_side_mm,
+            "{:.1f} mm".format(cover_end_start_mm) if cover_end_start_mm is not None else "n/a (supported)",
+            "{:.1f} mm".format(cover_end_end_mm) if cover_end_end_mm is not None else "n/a (supported)",
+        )
     )
     output.print_md(
         "- offset_top (innermost, layer {}) = {:.1f} mm, offset_btm (innermost, layer {}) "
@@ -350,12 +365,9 @@ def main():
         )
         script.exit()
 
-    # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end.
-    support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
-    support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
-    is_supported_start = support_start is not None
-    is_supported_end = support_end is not None
-
+    # --- rev 2 section 2.4/2.5 (A9/A12/A14): support presence, checked here
+    # (support_start/support_end were already resolved above, ahead of the
+    # cover reads).
     if not is_supported_start and not is_supported_end:
         forms.alert(
             "No support (column, wall or girder) detected at EITHER end "
@@ -387,12 +399,16 @@ def main():
     support_cover_start_mm = support_cover_end_mm = None
     try:
         if is_supported_start:
-            support_cover_start_mm = read_support_cover_mm(
-                support_start, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm
+            support_start_host_data = validate_rebar_host(support_start)
+            support_cover_start_mm = read_support_side_cover_mm(
+                support_start, support_start_host_data, axis, True, internal_to_mm,
+                element_id=support_start.Id,
             )
         if is_supported_end:
-            support_cover_end_mm = read_support_cover_mm(
-                support_end, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm
+            support_end_host_data = validate_rebar_host(support_end)
+            support_cover_end_mm = read_support_side_cover_mm(
+                support_end, support_end_host_data, axis, False, internal_to_mm,
+                element_id=support_end.Id,
             )
     except HostValidationError as ex:
         forms.alert(str(ex), title="Cover read-back failed")
@@ -402,13 +418,13 @@ def main():
         is_supported_start,
         support_width_mm=support_width_start_mm,
         support_cover_mm=support_cover_start_mm,
-        beam_end_cover_mm=cover_end_mm,
+        beam_end_cover_mm=cover_end_start_mm,
     )
     result_end = crack_bar_end_result(
         is_supported_end,
         support_width_mm=support_width_end_mm,
         support_cover_mm=support_cover_end_mm,
-        beam_end_cover_mm=cover_end_mm,
+        beam_end_cover_mm=cover_end_end_mm,
     )
 
     def _format_end(label, result):
@@ -450,14 +466,15 @@ def main():
     else:
         ref_end = end_pt
 
-    cover_end_internal = mm_to_internal(cover_end_mm)
     du_internal, dv_internal = beam_section_centre_offsets(beam, start_pt)
 
     a_start_internal = (
-        mm_to_internal(result_start.embedment_mm) if is_supported_start else cover_end_internal
+        mm_to_internal(result_start.embedment_mm) if is_supported_start
+        else mm_to_internal(cover_end_start_mm)
     )
     a_end_internal = (
-        mm_to_internal(result_end.embedment_mm) if is_supported_end else cover_end_internal
+        mm_to_internal(result_end.embedment_mm) if is_supported_end
+        else mm_to_internal(cover_end_end_mm)
     )
 
     def do_place():

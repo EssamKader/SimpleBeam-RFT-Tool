@@ -212,17 +212,15 @@ deliverable an engineer reads to decide whether to trust the bars.
   thickness including both wythes/layers, or something narrower (e.g. the
   wall type's nominal thickness vs. as-built) -- is assumed, not confirmed.
   Flagged in `tests/fake_revit_api.py`'s header per `CONTEXT.md`.
-- **Which `RebarFaceType` member (if any) actually addresses a framing
-  element's cut END face**, as distinct from its side/top/bottom faces, for
-  the unsupported-end `beam_end_cover` read. This ticket kept
-  `BEAM_END_FACE_TYPE = RebarFaceType.Other` -- the same placeholder already
-  used for the support's side cover and the beam's own side cover -- but
-  named it as a THIRD, conceptually distinct constant so a future fix to any
-  one of the three does not silently change the other two. Whether
-  `RebarHostData` exposes an end-face cover AT ALL is unconfirmed and
-  flagged in the script's own module-level comment, which is stronger than
-  the pre-existing uncertainty this whole area already carried (see
-  `rft/revit/host.py`'s module docstring).
+- **Superseded by issue #30 (Revit 2024 live probe):** `RebarFaceType`
+  does not exist at all, so the paragraph this replaces (asking "which
+  member addresses a cut END face") no longer applies -- there is no
+  member of anything. Confirmed live: `GetExposedFaces()` returns NO end
+  face at all on a SUPPORTED beam (both ends are inside their columns), so
+  `beam_end_cover` now has a real answer -- it is only ever requested, via
+  `read_beam_face_covers_mm`'s `need_end_start`/`need_end_end` flags, at
+  whichever end is actually unsupported, which is exactly where an end
+  face IS exposed. See `docs/verification/issue-30-cover-face-reads.md`.
 - **`OST_Walls`/`OST_StructuralFraming` as valid `FilteredElementCollector.OfCategory`
   arguments** are assumed to exist and behave like `OST_StructuralColumns`
   already did (untested new API surface, flagged in `tests/fake_revit_api.py`).

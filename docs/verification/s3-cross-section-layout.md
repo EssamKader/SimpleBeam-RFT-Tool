@@ -111,14 +111,15 @@ project. Worth remembering when reviewing #17 and #19.
   Bars.pushbutton/script.py`'s imports, its `FlexForm` interaction, and its
   end-to-end wiring of core + adapter are unexercised, same limitation as S1
   and S5's pushbuttons.
-- **`RebarFaceType.Top` and the beam's side-face read-back** carry the same
-  unresolved-shape caveat already flagged in `rft/revit/host.py`'s module
-  docstring for `Bottom`/`Other` — using it for the top face, and (after the
-  review) for the beam's own side face, changes nothing about that risk: it is
-  the same unconfirmed API shape applied to more enum members. If
-  `RebarFaceType.Other` is not how a beam's side face is actually addressed,
-  the side cover read throws on first run rather than returning a wrong
-  number, which is the failure mode to prefer.
+- **Superseded by issue #30 (Revit 2024 live probe):** `RebarFaceType`
+  does not exist, so the caveat this replaces (about which member is
+  correct) no longer applies. Cover reads now go through
+  `read_beam_face_covers_mm`, which classifies each exposed face by its
+  own normal rather than an enum lookup — see
+  `docs/verification/issue-30-cover-face-reads.md`. The failure mode this
+  paragraph asked to prefer (throw rather than return a wrong number) is
+  preserved: an oblique/unclassifiable face still refuses rather than
+  guessing.
 - **Placing many `Rebar.CreateFromCurves` calls inside one loop, inside one
   `Transaction`, for a multi-layer x multi-bar-count beam** has not been
   exercised against a real document for performance or for any undocumented

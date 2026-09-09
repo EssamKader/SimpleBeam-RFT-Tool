@@ -116,17 +116,16 @@ limitation every prior ticket's write-up carries.
   hoc import smoke check described above, no full placement run (with a
   real beam, a real support, and a real `RebarHostData` cover chain) has
   been exercised.
-- **All the pre-existing SHAPE UNVERIFIED items this pushbutton inherits
-  unchanged**: `RebarHostData.GetFaces`/`GetCoverType`'s whole shape
-  (`rft/revit/host.py`), `RebarBarType.BarNominalDiameter` vs.
-  `BarModelDiameter` (`rft/revit/bar_types.py`), which `RebarFaceType`
-  member (if any) actually addresses a beam's own cut-END face vs. its side
-  face vs. a support's own cover face -- this ticket adds a FOURTH
-  conceptually distinct cover read (the supporting element's own cover, via
-  `SUPPORT_SIDE_FACE_TYPE`) on top of the three "Place Main Bars.pushbutton"
-  already carries, all four currently mapped to the same unverified
-  `RebarFaceType.Other` placeholder. None of this is newly introduced risk
-  -- it is the same open question, applied to one more pushbutton.
+- **Superseded by issue #30 (Revit 2024 live probe):** `RebarHostData.GetFaces`/
+  `GetCoverType`'s assumed shape did not exist, and neither did
+  `RebarFaceType`. Cover reads here now go through `read_beam_face_covers_mm`
+  / `read_support_side_cover_mm`, classifying each exposed face by its own
+  normal -- see `docs/verification/issue-30-cover-face-reads.md`. This
+  pushbutton's FOUR conceptually distinct cover reads (top, bottom, side,
+  and the supporting element's own cover) are unchanged in concept, only in
+  mechanism. `RebarBarType.BarNominalDiameter` vs. `BarModelDiameter`
+  remains open, though issue #23's live probe found both properties exist
+  and returned identical values in the test model.
 - **`pyrevit.forms.SelectFromList.show`'s exact signature** -- same
   unconfirmed shape every other pushbutton's `select_bar_type_for_role`
   carries; this pushbutton's four calls to it (crack, top main, bottom

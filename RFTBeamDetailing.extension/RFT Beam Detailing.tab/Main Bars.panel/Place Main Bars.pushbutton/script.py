@@ -37,7 +37,7 @@ SCOPE BOUNDARIES (see this ticket's report for the full rationale):
   scope ("close that hole here rather than adding a fourth pushbutton").
 """
 
-from pyrevit import DB, forms, revit, script
+from pyrevit import forms, revit, script
 from pyrevit.forms import Button, FlexForm, Label, TextBox
 
 from rft.core.anchorage import (
@@ -88,7 +88,7 @@ from rft.revit.geometry import (
     support_width_along_axis_mm,
 )
 from rft.revit.guards import continuous_run_guard
-from rft.revit.host import HostValidationError, read_face_cover_mm, read_support_cover_mm, validate_rebar_host
+from rft.revit.host import HostValidationError, read_beam_face_covers_mm, read_support_side_cover_mm, validate_rebar_host
 from rft.revit.placement import (
     bar_point_at_uv,
     bend_plane_normal,
@@ -102,33 +102,23 @@ from rft.revit.units import internal_to_mm, mm_to_internal
 output = script.get_output()
 doc = revit.doc
 
-# UNVERIFIED AGAINST A LIVE HOST -- same open question S1 carries (rft/
-# revit/host.py module docstring): whether RebarFaceType is even the real
-# RebarHostData face-lookup shape. THREE conceptually distinct covers are
-# read in this script, per this ticket's instructions -- kept as three
-# separate constants even though the API-shape uncertainty currently maps
-# all three to the same enum member, so a future fix to any one of them
-# does not silently change the other two:
+# Cover reads (issue #30) go through `rft.revit.host.read_beam_face_covers_mm`
+# / `read_support_side_cover_mm`, which classify each exposed face's own
+# normal against the beam's frame rather than looking it up by the
+# nonexistent `RebarFaceType` enum -- see that module's docstring. FOUR
+# conceptually distinct covers still exist and must never be substituted for
+# one another:
 #
-# 1. SUPPORT_SIDE_FACE_TYPE -- the SUPPORTING element's own cover (rev 2
-#    section 2.4, A8), read off the support (column/wall/girder), used in
-#    a_t / a_btm. NOT the beam's own cover.
-# 2. BEAM_SIDE_FACE_TYPE -- the BEAM's own side-face cover (rev 2 sections
-#    4, 6, 7), used for every HORIZONTAL cross-section dimension (corner
-#    bar inset, spacer length). NOT a top/bottom face cover, NOT the
-#    support's cover.
-# 3. BEAM_END_FACE_TYPE -- the BEAM's own cover at its CUT END (rev 2
-#    section 2.5, R3 resolved: "beam end - cover"), used ONLY for the
-#    unsupported-end straight run. A THIRD thing again: neither the
-#    support's cover nor the beam's side cover. Whether ``RebarHostData``
-#    exposes a face specifically for a framing element's cut end (as
-#    opposed to a side/top/bottom face) is UNCLEAR and not confirmed by
-#    either docs/research/revit-api-strategy.md or rft/revit/host.py's own
-#    module docstring -- flagged here rather than silently reusing another
-#    constant's value without comment.
-SUPPORT_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
-BEAM_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
-BEAM_END_FACE_TYPE = DB.Structure.RebarFaceType.Other
+# 1. The SUPPORTING element's own cover (rev 2 section 2.4, A8), read off
+#    the support (column/wall/girder), used in a_t / a_btm. NOT the beam's
+#    own cover.
+# 2. The BEAM's own TOP/BOTTOM face cover (rev 2 section 4), used for the
+#    layer offsets. NOT the side cover, NOT the support's cover.
+# 3. The BEAM's own SIDE-face cover (rev 2 sections 6, 7), used for every
+#    HORIZONTAL cross-section dimension (corner-bar inset, spacer length).
+# 4. The BEAM's own cover at its CUT END (rev 2 section 2.5, R3 resolved:
+#    "beam end - cover"), used ONLY for the unsupported-end straight run --
+#    only ever exposed as a face when that end has no support (issue #30).
 
 
 def select_bar_type_for_role(document, role):
@@ -329,23 +319,6 @@ def main():
         forms.alert("\n\n".join(c.message for c in conflicts), title="Stirrup/main bar grade conflict")
         script.exit()
 
-    try:
-        cover_top_mm = read_face_cover_mm(
-            host_data, DB.Structure.RebarFaceType.Top, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_btm_mm = read_face_cover_mm(
-            host_data, DB.Structure.RebarFaceType.Bottom, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_side_mm = read_face_cover_mm(
-            host_data, BEAM_SIDE_FACE_TYPE, doc, internal_to_mm, element_id=beam.Id
-        )
-        cover_end_mm = read_face_cover_mm(
-            host_data, BEAM_END_FACE_TYPE, doc, internal_to_mm, element_id=beam.Id
-        )
-    except HostValidationError as ex:
-        forms.alert(str(ex), title="Cover read-back failed")
-        script.exit()
-
     b_mm, h_mm = beam_section_dimensions_mm(beam, internal_to_mm)
     start_pt, end_pt = beam_endpoints(beam)
     axis = beam_axis_direction(beam)
@@ -368,6 +341,86 @@ def main():
             "\n\n".join(g.message for g in continuous_guards),
             title="Continuous run detected -- refused",
         )
+        script.exit()
+
+    # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end,
+    # any support type -- a missing support takes the unsupported path,
+    # never a hard stop, so top/bottom anchorage can be computed at both
+    # ends independently below. Moved ahead of the cover reads (issue #30):
+    # `cover_end` is only exposed as a face on an UNSUPPORTED end
+    # (`GetExposedFaces()` returns no end face at all on a supported beam),
+    # so whether it is even requested depends on knowing support status
+    # first.
+    support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
+    support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
+    is_supported_start = support_start is not None
+    is_supported_end = support_end is not None
+
+    if not is_supported_start and not is_supported_end:
+        forms.alert(
+            "No support (column, wall or girder) detected at EITHER end "
+            "(rev 2 section 2.4/2.5, A9/A12/A14). This tool details a "
+            "single-span, simply-supported beam -- a beam with no support "
+            "at all is not a span and is refused outright rather than "
+            "silently detailed (this specific hard-stop is this project's "
+            "own judgement call, not a rev 2 rule; A14's own requirement is "
+            "only to WARN at a free end, which is what happens below when "
+            "just ONE end is unsupported).",
+            title="No support detected",
+        )
+        script.exit()
+
+    warnings = []
+    if not is_supported_start:
+        warnings.append("Start end: " + free_end_configuration_warning())
+    if not is_supported_end:
+        warnings.append("End end: " + free_end_configuration_warning())
+
+    # --- THREE-to-FOUR cover situation (issue #30, replacing the nonexistent
+    # `RebarFaceType`): TOP/BOTTOM feed the layer offsets (section 4),
+    # SIDE feeds every horizontal cross-section dimension (corner-bar
+    # inset, section 6.1). END is only requested at an unsupported end
+    # (section 2.5, A12, R3) -- requesting it where it does not exist would
+    # be a refusal, so it must never be requested unconditionally. The
+    # SUPPORTING element's own cover (section 2.4, A8) is a further,
+    # separate read, off the support's own exposed faces, not the beam's.
+    try:
+        beam_covers = read_beam_face_covers_mm(
+            beam, host_data, u_dir, v_dir, axis, internal_to_mm, element_id=beam.Id,
+            need_end_start=not is_supported_start, need_end_end=not is_supported_end,
+        )
+    except HostValidationError as ex:
+        forms.alert(str(ex), title="Cover read-back failed")
+        script.exit()
+
+    cover_top_mm = beam_covers.top_mm
+    cover_btm_mm = beam_covers.bottom_mm
+    cover_side_mm = beam_covers.side_mm
+    # Only one of these is ever populated, at whichever end is unsupported;
+    # the anchorage/report code below reads `cover_end_mm` unconditionally
+    # for whichever end needs it, so pick whichever is not None (both may be
+    # None if both ends are supported, in which case cover_end_mm is unused).
+    cover_end_mm = (
+        beam_covers.end_start_mm if beam_covers.end_start_mm is not None
+        else beam_covers.end_end_mm
+    )
+
+    support_cover_start_mm = support_cover_end_mm = None
+    try:
+        if is_supported_start:
+            support_start_host_data = validate_rebar_host(support_start)
+            support_cover_start_mm = read_support_side_cover_mm(
+                support_start, support_start_host_data, axis, True, internal_to_mm,
+                element_id=support_start.Id,
+            )
+        if is_supported_end:
+            support_end_host_data = validate_rebar_host(support_end)
+            support_cover_end_mm = read_support_side_cover_mm(
+                support_end, support_end_host_data, axis, False, internal_to_mm,
+                element_id=support_end.Id,
+            )
+    except HostValidationError as ex:
+        forms.alert(str(ex), title="Cover read-back failed")
         script.exit()
 
     # --- §6.2-6.4 spacing validation (A21, A27, A28, A29, A36, A43, A44),
@@ -397,49 +450,6 @@ def main():
             "\n\n".join(g.message for g in spacing_guard_messages),
             title="Spacing violation -- refused (rev 2 section 6.2-6.4)",
         )
-        script.exit()
-
-    # --- rev 2 section 2.4/2.5 (A9/A12/A14): support detection, per end,
-    # any support type -- a missing support takes the unsupported path,
-    # never a hard stop, so top/bottom anchorage can be computed at both
-    # ends independently below.
-    support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
-    support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
-    is_supported_start = support_start is not None
-    is_supported_end = support_end is not None
-
-    if not is_supported_start and not is_supported_end:
-        forms.alert(
-            "No support (column, wall or girder) detected at EITHER end "
-            "(rev 2 section 2.4/2.5, A9/A12/A14). This tool details a "
-            "single-span, simply-supported beam -- a beam with no support "
-            "at all is not a span and is refused outright rather than "
-            "silently detailed (this specific hard-stop is this project's "
-            "own judgement call, not a rev 2 rule; A14's own requirement is "
-            "only to WARN at a free end, which is what happens below when "
-            "just ONE end is unsupported).",
-            title="No support detected",
-        )
-        script.exit()
-
-    warnings = []
-    if not is_supported_start:
-        warnings.append("Start end: " + free_end_configuration_warning())
-    if not is_supported_end:
-        warnings.append("End end: " + free_end_configuration_warning())
-
-    support_cover_start_mm = support_cover_end_mm = None
-    try:
-        if is_supported_start:
-            support_cover_start_mm = read_support_cover_mm(
-                support_start, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm
-            )
-        if is_supported_end:
-            support_cover_end_mm = read_support_cover_mm(
-                support_end, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm
-            )
-    except HostValidationError as ex:
-        forms.alert(str(ex), title="Cover read-back failed")
         script.exit()
 
     # --- §4/§4.1: per-layer offsets, both faces --------------------------

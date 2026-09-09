@@ -230,10 +230,10 @@ def unsupported_end_straight_run_mm(distance_to_beam_end_mm, beam_end_cover_mm):
     value in this ticket, distinct from both the supporting element's own
     cover used in ``top_bar_anchorage``/``bottom_bar_anchorage`` (rev 2
     section 2.4, A8) and the beam's FACE cover used across sections 4, 6
-    and 7 (rev 2 section 1, A4). Which ``RebarFaceType`` member actually
-    reads a framing element's cut-END cover (as opposed to a side/top/
-    bottom face) is unclear and flagged in the adapter layer -- see this
-    ticket's report.
+    and 7 (rev 2 section 1, A4). The beam's own END face (as opposed to a
+    side/top/bottom face) is only ever exposed at an unsupported/free end
+    (issue #30) -- ``rft.revit.host.read_beam_face_covers_mm`` reads it
+    conditionally for exactly that reason.
 
     ``distance_to_beam_end_mm`` is the adapter-computed geometric distance
     (mm) from wherever this bar's straight run begins to the beam's own

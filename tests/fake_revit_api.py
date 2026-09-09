@@ -20,14 +20,27 @@ Every fake standing in for an API whose shape is not documentation-confirmed
 must carry an inline ``SHAPE UNVERIFIED`` note naming what is assumed, so a
 green suite is never mistaken for API validation.
 
+VERIFIED LIVE (issue #30, Revit 2024, ``RevitAPI 24.3.40.0`` — see issue
+#23's live probe) and so REMOVED from the list below:
+
+- ``RebarHostData`` does NOT expose ``GetFaces(RebarFaceType)`` /
+  ``GetCoverType(face) -> ElementId`` — that whole shape, including the
+  ``RebarFaceType`` enum itself, does not exist. The real shape is
+  ``GetExposedFaces() -> IList<Reference>`` and
+  ``GetCoverType(Reference) -> RebarCoverType`` (the ``RebarCoverType``
+  object itself, not an ``ElementId`` needing a further ``doc.GetElement``
+  round trip). ``FakeRebarHostData`` and every scenario-specific host-data
+  stub below are now built to this shape.
+- ``face.ComputeNormal(UV) -> XYZ`` and
+  ``Element.GetGeometryObjectFromReference(Reference) -> Face`` both work
+  live and were how the probe recovered each exposed face's normal.
+- ``RebarCoverType.CoverDistance`` (internal units) is a real, readable
+  property — confirmed live. ``RebarCoverType.Id``/``.Name`` are assumed to
+  be the standard ``Element`` members (not specifically probed, but not a
+  new assumption either).
+
 Currently ``SHAPE UNVERIFIED``:
 
-- ``RebarHostData.GetFaces(RebarFaceType) -> list`` and
-  ``GetCoverType(face) -> ElementId``. Documentation research instead found
-  ``GetExposedFaces() -> IList<Reference>`` and
-  ``GetCoverType(Reference) -> RebarCoverType``, i.e. the whole face-lookup
-  shape may be wrong, not just the face argument. Tracked for correction
-  against a live host — see ``docs/verification/s1-tracer-bullet.md``.
 - ``FamilyInstance.get_Geometry() -> GeometryInstance`` for a structural
   column OR BEAM, used by the rotation-aware support-width path and, since
   issue #18's review, by the beam's own section width and centroid datum.
@@ -128,6 +141,68 @@ class FakeXYZ(object):
 
 
 FakeXYZ.BasisZ = FakeXYZ(0.0, 0.0, 1.0)
+
+
+class FakeUV(object):
+    """Stand-in for ``Autodesk.Revit.DB.UV``, the 2D parameter passed to
+    ``Face.ComputeNormal`` (confirmed live, issue #23/#30). Only ``U``/``V``
+    are exposed; ``rft.revit.host`` never reads them back, it only
+    round-trips the object to a fake ``Face.ComputeNormal``."""
+
+    def __init__(self, u=0.0, v=0.0):
+        self.U, self.V = u, v
+
+
+class FakeReference(object):
+    """Stand-in for ``Autodesk.Revit.DB.Reference`` -- the geometric
+    handle ``RebarHostData.GetExposedFaces()`` returns (confirmed live,
+    issue #23). Opaque in the real API; this fake carries a ``label`` only
+    for test diagnostics, never read by adapter code."""
+
+    def __init__(self, label):
+        self.label = label
+
+    def __repr__(self):
+        return "FakeReference({!r})".format(self.label)
+
+
+class FakeFace(object):
+    """Stand-in for the ``Face`` object
+    ``Element.GetGeometryObjectFromReference(Reference)`` resolves a
+    ``Reference`` into (confirmed live, issue #23). Only ``ComputeNormal``
+    is exercised; the real object carries far more (area, curve loops,
+    etc.) that this project has no use for."""
+
+    def __init__(self, normal):
+        self._normal = normal
+
+    def ComputeNormal(self, _uv):
+        return self._normal
+
+
+class FakeRebarCoverType(object):
+    """Stand-in for ``Autodesk.Revit.DB.Structure.RebarCoverType``, the
+    object ``RebarHostData.GetCoverType(Reference)`` returns DIRECTLY
+    (confirmed live, issue #23/#30 -- NOT an ``ElementId`` needing a
+    ``doc.GetElement`` round trip, which was this project's earlier,
+    now-corrected assumption). ``CoverDistance`` is confirmed live;
+    ``Id``/``Name`` are the standard ``Element`` members, not independently
+    probed but not a new assumption either. The live model carried two
+    DIFFERENT ``RebarCoverType`` elements sharing the identical ``Name``
+    (``"Interior (framing, columns)"``, 38.1 mm and 40 mm) -- callers must
+    compare by ``Id``, never ``Name``; this fake supports constructing two
+    such distinct-id, same-name instances for exactly that test.
+    """
+
+    _next_id = [1]
+
+    def __init__(self, cover_distance_internal, name=None, id_value=None):
+        self.CoverDistance = cover_distance_internal
+        self.Name = name
+        if id_value is None:
+            id_value = FakeRebarCoverType._next_id[0]
+            FakeRebarCoverType._next_id[0] += 1
+        self.Id = FakeElementId(id_value)
 
 
 class FakeLine(object):
@@ -329,14 +404,6 @@ class FakeBuiltInParameter(object):
     REBAR_HOOK_ANGLE = object()
 
 
-class FakeRebarFaceType(object):
-    Bottom = object()
-    Top = object()
-    Other = object()
-    Exterior = object()
-    Interior = object()
-
-
 class FakeOptions(object):
     pass
 
@@ -385,6 +452,7 @@ def install():
     autodesk_pkg = types.ModuleType("Autodesk")
 
     db.XYZ = FakeXYZ
+    db.UV = FakeUV
     db.Line = FakeLine
     db.ElementId = FakeElementId
     db.UnitTypeId = FakeUnitTypeId
@@ -403,7 +471,6 @@ def install():
     structure.RebarHookOrientation = FakeRebarHookOrientation
     structure.Rebar = FakeRebar
     structure.RebarBarType = FakeRebarBarType
-    structure.RebarFaceType = FakeRebarFaceType
     structure.RebarHookType = FakeRebarHookType
 
     revit_pkg.DB = db

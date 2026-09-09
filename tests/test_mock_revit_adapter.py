@@ -15,14 +15,29 @@ import pytest
 
 from fake_revit_api import (
     FakeElementId,
+    FakeFace,
     FakeRebarBarType,
+    FakeRebarCoverType,
     FakeRebarHookType,
+    FakeReference,
     FakeTransaction,
     FakeXYZ,
 )
 
 from rft.core.anchorage import top_bar_anchorage
-from rft.revit.host import HostValidationError, read_face_cover_mm, validate_rebar_host
+from rft.revit.host import (
+    FACE_ROLE_BOTTOM,
+    FACE_ROLE_END_END,
+    FACE_ROLE_END_START,
+    FACE_ROLE_SIDE,
+    FACE_ROLE_TOP,
+    HostValidationError,
+    classify_face_role,
+    face_normal,
+    read_beam_face_covers_mm,
+    read_support_side_cover_mm,
+    validate_rebar_host,
+)
 from rft.revit.placement import (
     bar_face_points_at_uv,
     bar_point_at_uv,
@@ -101,68 +116,355 @@ def test_validate_rebar_host_succeeds_and_returns_host_data(monkeypatch):
     assert result.IsValidHost() is True
 
 
-class _FaceStub(object):
-    pass
+FT_PER_MM = 1.0 / 304.8
 
 
-class _HostDataNoFaces(object):
-    def GetFaces(self, _face_type):
-        return []
+def _ft(mm):
+    return mm * FT_PER_MM
 
 
-class _HostDataUndefinedCover(object):
-    def GetFaces(self, _face_type):
-        return [_FaceStub()]
+class _FakeBeamElement(object):
+    """SHAPE UNVERIFIED companion for the classify-by-normal tests: a stub
+    standing in for a beam ``Element``, only implementing
+    ``GetGeometryObjectFromReference`` (confirmed live, issue #23) as a
+    dict lookup from ``FakeReference`` to ``FakeFace``."""
 
-    def GetCoverType(self, _face):
-        return FakeElementId.InvalidElementId
+    def __init__(self, id_value, faces_by_reference):
+        self.Id = id_value
+        self._faces_by_reference = faces_by_reference
 
-
-class _CoverType(object):
-    def __init__(self, distance_internal):
-        self.CoverDistance = distance_internal
-
-
-class _HostDataDefinedCover(object):
-    def __init__(self, cover_internal):
-        self._cover_internal = cover_internal
-
-    def GetFaces(self, _face_type):
-        return [_FaceStub()]
-
-    def GetCoverType(self, _face):
-        return FakeElementId(7)
+    def GetGeometryObjectFromReference(self, reference):
+        return self._faces_by_reference[reference]
 
 
-class _DocReturningCoverType(object):
-    def __init__(self, distance_internal):
-        self._cover_type = _CoverType(distance_internal)
+class _HostDataFromFaces(object):
+    """A ``RebarHostData`` stand-in built the CONFIRMED-LIVE way (issue #23):
+    ``GetExposedFaces() -> IList<Reference>`` and
+    ``GetCoverType(Reference) -> RebarCoverType`` directly (no ``doc.GetElement``
+    round trip, and no ``RebarFaceType`` in sight)."""
 
-    def GetElement(self, _element_id):
-        return self._cover_type
+    def __init__(self, cover_by_reference):
+        self._cover_by_reference = cover_by_reference
+
+    def GetExposedFaces(self):
+        return list(self._cover_by_reference.keys())
+
+    def GetCoverType(self, reference):
+        return self._cover_by_reference[reference]
 
 
-def test_read_face_cover_raises_when_no_face_found():
-    with pytest.raises(HostValidationError, match="No .* face"):
-        read_face_cover_mm(_HostDataNoFaces(), "Bottom", doc=None, from_internal_units=lambda v: v)
+# A beam running along +X, axis-aligned with the world -- deliberately
+# ALSO tested at 45 degrees below (issue #30's named trap: a beam parallel
+# to a project axis cannot catch a world-axis-shortcut defect).
+AXIS_X = FakeXYZ(1.0, 0.0, 0.0)
+U_DIR_Y = FakeXYZ(0.0, -1.0, 0.0)  # (-axis.Y, axis.X, 0) per beam_section_axes
+V_DIR_Z = FakeXYZ.BasisZ
 
 
-def test_read_face_cover_raises_on_undefined_cover_rather_than_silently_defaulting():
-    """The whole point of §10's explicit read-back: an undefined face cover
-    must surface as an error, never a silently-accepted document default."""
-    with pytest.raises(HostValidationError, match="document default"):
-        read_face_cover_mm(
-            _HostDataUndefinedCover(), "Bottom", doc=None, from_internal_units=lambda v: v
+def test_classify_face_role_top_bottom_side_and_end_axis_aligned():
+    assert classify_face_role(FakeXYZ(0, 0, 1), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_TOP
+    assert classify_face_role(FakeXYZ(0, 0, -1), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_BOTTOM
+    assert classify_face_role(FakeXYZ(0, -1, 0), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_SIDE
+    assert classify_face_role(FakeXYZ(0, 1, 0), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_SIDE
+    assert classify_face_role(FakeXYZ(-1, 0, 0), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_END_START
+    assert classify_face_role(FakeXYZ(1, 0, 0), U_DIR_Y, V_DIR_Z, AXIS_X) == FACE_ROLE_END_END
+
+
+def test_classify_face_role_oblique_face_refuses_rather_than_guesses():
+    """rev 2 section 10: an unclassifiable face must never be assigned a
+    role by whichever direction happens to have the largest (but still
+    below-tolerance) dot product."""
+    oblique = FakeXYZ(0.7, 0.7, 0.14).Normalize()
+    assert classify_face_role(oblique, U_DIR_Y, V_DIR_Z, AXIS_X) is None
+
+
+def test_classify_face_role_is_rotation_aware_not_a_world_axis_shortcut():
+    """Issue #30's named trap, mirroring #18's bounding-box defect: a beam
+    at 45 degrees in plan has face normals that are oblique in WORLD terms
+    (n.Y and n.Z would both fail a naive `abs(n.Z) > tol` TOP test) but
+    exact in the beam's OWN frame. A green suite against only the +X beam
+    above would never catch a `normal.Z`/`normal.X` world-axis shortcut."""
+    axis_45 = FakeXYZ(1.0, 1.0, 0.0).Normalize()
+    u_dir_45 = FakeXYZ(-axis_45.Y, axis_45.X, 0.0).Normalize()
+    v_dir_45 = FakeXYZ.BasisZ
+
+    # The beam's own TOP face still normalises to (0, 0, 1) in world terms
+    # (rotation only happens in-plan) -- classify against the beam's own
+    # v_dir either way, no special case needed.
+    assert classify_face_role(FakeXYZ(0, 0, 1), u_dir_45, v_dir_45, axis_45) == FACE_ROLE_TOP
+
+    # The beam's SIDE face normal is perpendicular to the 45-degree axis in
+    # plan: neither a pure world X nor a pure world Y vector, but EXACTLY
+    # u_dir_45 -- a world-axis check (`abs(n.X) > tol` or `abs(n.Y) > tol`)
+    # would misclassify or refuse this face; the frame-relative check must
+    # not.
+    assert classify_face_role(u_dir_45, u_dir_45, v_dir_45, axis_45) == FACE_ROLE_SIDE
+    assert classify_face_role(u_dir_45.Negate(), u_dir_45, v_dir_45, axis_45) == FACE_ROLE_SIDE
+
+    # The beam's END face normal is exactly +/- axis_45, again neither a
+    # pure world X nor Y vector.
+    assert classify_face_role(axis_45, u_dir_45, v_dir_45, axis_45) == FACE_ROLE_END_END
+    assert classify_face_role(axis_45.Negate(), u_dir_45, v_dir_45, axis_45) == FACE_ROLE_END_START
+
+    # And the SAME face normal, misread against the WRONG (world, +X)
+    # frame, is oblique to every one of that frame's own directions (its
+    # dot products with u/v/axis are all ~0.707, none above tolerance) and
+    # so REFUSES rather than silently classifying as anything at all --
+    # demonstrating why `beam_section_axes`' own (u_dir, v_dir, axis) must
+    # be threaded through, never re-derived or approximated by a world
+    # shortcut: get the frame wrong and a real END face stops classifying
+    # as anything, rather than classifying as the wrong thing.
+    assert classify_face_role(axis_45, U_DIR_Y, V_DIR_Z, AXIS_X) is None
+
+
+def _beam_with_faces(role_normals, beam_id=101):
+    """(_FakeBeamElement, _HostDataFromFaces) exposing one face per
+    (role, normal, cover_mm) tuple in ``role_normals`` -- ``role`` unused by
+    the fakes themselves, kept only for readability at each call site.
+
+    Faces sharing the same ``cover_mm`` value get the SAME
+    ``FakeRebarCoverType`` instance (and so the same ``Id``) -- otherwise
+    every call would mint a distinct auto-incremented id per face even for
+    an intentionally-equal cover, which would spuriously fail the two-SIDE-
+    faces-must-match check these fakes exist to exercise.
+    """
+    faces_by_reference = {}
+    cover_by_reference = {}
+    covers_by_value = {}
+    for index, (_role, normal, cover_mm) in enumerate(role_normals):
+        reference = FakeReference("face-{}".format(index))
+        faces_by_reference[reference] = FakeFace(normal)
+        if cover_mm is None:
+            cover_by_reference[reference] = None
+            continue
+        if cover_mm not in covers_by_value:
+            covers_by_value[cover_mm] = FakeRebarCoverType(_ft(cover_mm), name="Interior")
+        cover_by_reference[reference] = covers_by_value[cover_mm]
+    beam = _FakeBeamElement(beam_id, faces_by_reference)
+    host_data = _HostDataFromFaces(cover_by_reference)
+    return beam, host_data
+
+
+def test_read_beam_face_covers_reads_top_bottom_and_side_four_face_supported_beam():
+    """The live-host shape (issue #23): a SUPPORTED beam exposes exactly
+    FOUR faces -- TOP, BOTTOM, two SIDEs -- and NO end face at all."""
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), 38.1),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("SIDE", FakeXYZ(0, 1, 0), 38.1),
+    ])
+    covers = read_beam_face_covers_mm(
+        beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=beam.Id,
+    )
+    assert covers.top_mm == pytest.approx(38.1)
+    assert covers.bottom_mm == pytest.approx(38.1)
+    assert covers.side_mm == pytest.approx(38.1)
+    assert covers.end_start_mm is None
+    assert covers.end_end_mm is None
+
+
+def test_read_beam_face_covers_end_not_requested_on_a_supported_beam_is_not_an_error():
+    """Requesting neither end face (both ends supported) must succeed even
+    though no end face is exposed at all -- the whole point of issue #30's
+    `need_end_start`/`need_end_end` flags."""
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), 38.1),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("SIDE", FakeXYZ(0, 1, 0), 38.1),
+    ])
+    covers = read_beam_face_covers_mm(
+        beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=beam.Id, need_end_start=False, need_end_end=False,
+    )
+    assert covers.end_start_mm is None
+    assert covers.end_end_mm is None
+
+
+def test_read_beam_face_covers_raises_when_a_required_end_face_is_missing():
+    """A missing end face at an UNSUPPORTED end is a refusal, never a
+    fallback to another face's cover (issue #30 acceptance criterion)."""
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), 38.1),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("SIDE", FakeXYZ(0, 1, 0), 38.1),
+    ])
+    with pytest.raises(HostValidationError, match="No END .start. face exposed"):
+        read_beam_face_covers_mm(
+            beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+            element_id=beam.Id, need_end_start=True,
         )
 
 
-def test_read_face_cover_returns_explicit_value_in_mm():
-    host_data = _HostDataDefinedCover(cover_internal=0.08202099737532808)  # 25mm in ft
-    doc = _DocReturningCoverType(distance_internal=0.08202099737532808)
-    cover_mm = read_face_cover_mm(
-        host_data, "Bottom", doc=doc, from_internal_units=lambda v: v * 304.8
+def test_read_beam_face_covers_reads_end_face_when_present_and_required():
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), 38.1),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("SIDE", FakeXYZ(0, 1, 0), 38.1),
+        ("END_START", FakeXYZ(-1, 0, 0), 25.0),
+    ])
+    covers = read_beam_face_covers_mm(
+        beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=beam.Id, need_end_start=True,
     )
-    assert cover_mm == pytest.approx(25.0, abs=0.01)
+    assert covers.end_start_mm == pytest.approx(25.0)
+
+
+def test_read_beam_face_covers_raises_on_undefined_cover_rather_than_silently_defaulting():
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), None),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("SIDE", FakeXYZ(0, 1, 0), 38.1),
+    ])
+    with pytest.raises(HostValidationError, match="document default"):
+        read_beam_face_covers_mm(
+            beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+            element_id=beam.Id,
+        )
+
+
+def test_read_beam_face_covers_raises_on_oblique_face_naming_it_rather_than_guessing():
+    oblique_normal = FakeXYZ(0.7, 0.7, 0.14).Normalize()
+    beam, host_data = _beam_with_faces([
+        ("TOP", FakeXYZ(0, 0, 1), 38.1),
+        ("SIDE", FakeXYZ(0, -1, 0), 38.1),
+        ("BOTTOM", FakeXYZ(0, 0, -1), 38.1),
+        ("OBLIQUE", oblique_normal, 38.1),
+    ])
+    with pytest.raises(HostValidationError, match="oblique"):
+        read_beam_face_covers_mm(
+            beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+            element_id=beam.Id,
+        )
+
+
+def test_read_beam_face_covers_two_side_faces_with_equal_cover_ids_pass():
+    cover_a = FakeRebarCoverType(_ft(38.1), name="Interior (framing, columns)", id_value=42)
+    cover_b = FakeRebarCoverType(_ft(38.1), name="Interior (framing, columns)", id_value=42)
+    faces_by_reference = {
+        FakeReference("top"): FakeFace(FakeXYZ(0, 0, 1)),
+        FakeReference("bottom"): FakeFace(FakeXYZ(0, 0, -1)),
+        FakeReference("side-a"): FakeFace(FakeXYZ(0, -1, 0)),
+        FakeReference("side-b"): FakeFace(FakeXYZ(0, 1, 0)),
+    }
+    refs = list(faces_by_reference.keys())
+    cover_by_reference = dict(zip(refs, [
+        FakeRebarCoverType(_ft(38.1)), FakeRebarCoverType(_ft(38.1)), cover_a, cover_b,
+    ]))
+    beam = _FakeBeamElement(101, faces_by_reference)
+    host_data = _HostDataFromFaces(cover_by_reference)
+    covers = read_beam_face_covers_mm(
+        beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=beam.Id,
+    )
+    assert covers.side_mm == pytest.approx(38.1)
+
+
+def test_read_beam_face_covers_two_side_faces_same_name_different_id_refuses():
+    """The live model's own trap (issue #23/#30): two `RebarCoverType`
+    elements sharing the identical Name (`Interior (framing, columns)`) but
+    different Ids and different CoverDistance values. Comparing by name
+    would silently accept this; comparing by id must refuse."""
+    cover_a = FakeRebarCoverType(_ft(38.1), name="Interior (framing, columns)", id_value=1)
+    cover_b = FakeRebarCoverType(_ft(40.0), name="Interior (framing, columns)", id_value=2)
+    faces_by_reference = {
+        FakeReference("top"): FakeFace(FakeXYZ(0, 0, 1)),
+        FakeReference("bottom"): FakeFace(FakeXYZ(0, 0, -1)),
+        FakeReference("side-a"): FakeFace(FakeXYZ(0, -1, 0)),
+        FakeReference("side-b"): FakeFace(FakeXYZ(0, 1, 0)),
+    }
+    refs = list(faces_by_reference.keys())
+    cover_by_reference = dict(zip(refs, [
+        FakeRebarCoverType(_ft(38.1)), FakeRebarCoverType(_ft(38.1)), cover_a, cover_b,
+    ]))
+    beam = _FakeBeamElement(101, faces_by_reference)
+    host_data = _HostDataFromFaces(cover_by_reference)
+    with pytest.raises(HostValidationError, match="different cover types"):
+        read_beam_face_covers_mm(
+            beam, host_data, U_DIR_Y, V_DIR_Z, AXIS_X, from_internal_units=lambda v: v / FT_PER_MM,
+            element_id=beam.Id,
+        )
+
+
+def test_read_support_side_cover_mm_start_support_reads_the_far_face():
+    """Section 2.2's `a = support_width - cover` measures `a` inward from
+    the face the bar ENTERS, so the tip stops `cover` short of the FAR
+    face -- and it is the far face's own cover that governs. For the start
+    support that face's outward normal is -axis_direction, pointing AWAY
+    from the span, not toward the beam.
+
+    The two faces carry deliberately different covers (38.1 vs 999.0) so
+    that reading the entry face instead would fail this test loudly rather
+    than coincide, as it would on a support with equal cover all round."""
+    support = _FakeBeamElement(501, {
+        FakeReference("far (away from span, -axis)"): FakeFace(AXIS_X.Negate()),
+        FakeReference("entry (toward span, +axis)"): FakeFace(AXIS_X),
+        FakeReference("side"): FakeFace(FakeXYZ(0, 1, 0)),
+    })
+    refs = list(support._faces_by_reference.keys())
+    host_data = _HostDataFromFaces(dict(zip(refs, [
+        FakeRebarCoverType(_ft(38.1)), FakeRebarCoverType(_ft(999.0)), FakeRebarCoverType(_ft(999.0)),
+    ])))
+    cover_mm = read_support_side_cover_mm(
+        support, host_data, AXIS_X, True, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=support.Id,
+    )
+    assert cover_mm == pytest.approx(38.1)
+
+
+def test_read_support_side_cover_mm_end_support_reads_the_far_face_mirrored():
+    """Mirror of the start-support case: at the END support the bar enters
+    through the -axis face and its tip approaches the +axis face, so the
+    sign flips and the far face is the +axis one."""
+    support = _FakeBeamElement(502, {
+        FakeReference("entry (toward span, -axis)"): FakeFace(AXIS_X.Negate()),
+        FakeReference("far (beyond beam end, +axis)"): FakeFace(AXIS_X),
+    })
+    refs = list(support._faces_by_reference.keys())
+    host_data = _HostDataFromFaces(dict(zip(refs, [
+        FakeRebarCoverType(_ft(999.0)), FakeRebarCoverType(_ft(38.1)),
+    ])))
+    cover_mm = read_support_side_cover_mm(
+        support, host_data, AXIS_X, False, from_internal_units=lambda v: v / FT_PER_MM,
+        element_id=support.Id,
+    )
+    assert cover_mm == pytest.approx(38.1)
+
+
+def test_read_support_side_cover_mm_no_aligned_face_refuses():
+    support = _FakeBeamElement(503, {
+        FakeReference("side-a"): FakeFace(FakeXYZ(0, 1, 0)),
+        FakeReference("side-b"): FakeFace(FakeXYZ(0, -1, 0)),
+    })
+    refs = list(support._faces_by_reference.keys())
+    host_data = _HostDataFromFaces(dict(zip(refs, [
+        FakeRebarCoverType(_ft(38.1)), FakeRebarCoverType(_ft(38.1)),
+    ])))
+    with pytest.raises(HostValidationError, match="No exposed face"):
+        read_support_side_cover_mm(
+            support, host_data, AXIS_X, True, from_internal_units=lambda v: v / FT_PER_MM,
+            element_id=support.Id,
+        )
+
+
+def test_face_normal_resolves_reference_via_get_geometry_object_and_normalises():
+    """Confirmed live (issue #23):
+    ``Element.GetGeometryObjectFromReference(Reference).ComputeNormal(UV)``.
+    ``FakeReference`` has no custom ``__eq__``, so the SAME reference
+    object identity must be used to both build the beam's face dict and
+    look it up here -- matching the real API's Reference-as-opaque-handle
+    behaviour."""
+    reference = FakeReference("f")
+    beam = _FakeBeamElement(101, {reference: FakeFace(FakeXYZ(2.0, 0.0, 0.0))})
+    normal = face_normal(beam, reference)
+    assert normal.X == pytest.approx(1.0)
+    assert normal.Y == pytest.approx(0.0)
+    assert normal.Z == pytest.approx(0.0)
 
 
 def test_transaction_commits_on_success(monkeypatch):

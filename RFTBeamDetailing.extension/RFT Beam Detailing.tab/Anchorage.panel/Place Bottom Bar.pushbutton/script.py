@@ -39,28 +39,12 @@ from rft.revit.geometry import (
     start_support_face_point,
 )
 from rft.revit.guards import continuous_run_guard
-from rft.revit.host import HostValidationError, read_support_cover_mm, validate_rebar_host
+from rft.revit.host import HostValidationError, read_support_side_cover_mm, validate_rebar_host
 from rft.revit.placement import bend_plane_normal, build_bottom_bar_curves, place_anchored_bar, run_in_transaction
 from rft.revit.units import internal_to_mm, mm_to_internal
 
 output = script.get_output()
 doc = revit.doc
-
-# UNVERIFIED AGAINST A LIVE HOST -- issue #14 review finding #4: `Bottom`
-# (the column's BASE face) was definitely wrong for a bar entering the
-# column horizontally, which is governed by a SIDE face cover instead.
-# `Other` is the best-documented candidate: RebarHostData exposes distinct
-# `Exterior`/`Interior` cover only for walls (per-face parameters
-# CLEAR_COVER_EXTERIOR/CLEAR_COVER_INTERIOR); "most hosts" -- which
-# includes columns -- instead expose CLEAR_COVER_TOP/CLEAR_COVER_BOTTOM/
-# CLEAR_COVER_OTHER, where `Other` covers every side face lumped together
-# (a column has no single "exterior" side the way a wall does). This
-# remains unconfirmed without a live host -- see
-# docs/verification/s1-tracer-bullet.md and rft/revit/host.py's module
-# docstring, which flags a deeper concern: research now suggests the real
-# `RebarHostData` API may be `GetExposedFaces()` / `GetCoverType(Reference)`
-# rather than a `RebarFaceType`-keyed `GetFaces`/`GetCoverType` pair at all.
-SUPPORT_SIDE_FACE_TYPE = DB.Structure.RebarFaceType.Other
 
 
 def select_bar_type_for_role(document, role):
@@ -186,8 +170,14 @@ def main():
     support_width_end_mm = support_width_along_axis_mm(col_end, axis, internal_to_mm)
 
     try:
-        cover_start_mm = read_support_cover_mm(col_start, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm)
-        cover_end_mm = read_support_cover_mm(col_end, SUPPORT_SIDE_FACE_TYPE, doc, internal_to_mm)
+        col_start_host_data = validate_rebar_host(col_start)
+        col_end_host_data = validate_rebar_host(col_end)
+        cover_start_mm = read_support_side_cover_mm(
+            col_start, col_start_host_data, axis, True, internal_to_mm, element_id=col_start.Id
+        )
+        cover_end_mm = read_support_side_cover_mm(
+            col_end, col_end_host_data, axis, False, internal_to_mm, element_id=col_end.Id
+        )
     except HostValidationError as ex:
         forms.alert(str(ex), title="Cover read-back failed")
         script.exit()

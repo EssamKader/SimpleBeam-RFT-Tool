@@ -1,3 +1,17 @@
+> **Correction (issue #30, Revit 2024 live probe, `RevitAPI 24.3.40.0`):**
+> the concern raised below under "The exact `RebarHostData` face-enumeration
+> API" was correct, and the fresh research it describes was right:
+> `DB.Structure.RebarFaceType` **does not exist** — it is not merely
+> unconfirmed, the compiler rejects it. `read_face_cover_mm(host_data,
+> face_type, ...)` and `SUPPORT_SIDE_FACE_TYPE`/etc. described in points 2
+> and "Which `RebarFaceType` member is correct" below have been REMOVED and
+> replaced by `rft.revit.host.read_beam_face_covers_mm` /
+> `read_support_side_cover_mm`, which classify each exposed face's own
+> normal against the beam's frame instead of looking it up by a
+> nonexistent enum. See `docs/verification/issue-30-cover-face-reads.md`
+> for the live measurements and the new design. The "24/24 pass" figure
+> below is stale; the current count is reported in that write-up.
+
 # S1 Mock-Object Verification Write-up
 
 Required by `CONTEXT.md` ("no live Revit host" standing rule) and

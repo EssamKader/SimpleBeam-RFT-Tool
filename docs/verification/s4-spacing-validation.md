@@ -98,18 +98,21 @@ only that the import and the surrounding code still load.
   (reading `b_mm`/`cover_side_mm`/bar diameters from a real beam, then
   hitting `forms.alert` + `script.exit()` before any transaction) has
   never been exercised past `pick_element`.
-- **All pre-existing SHAPE UNVERIFIED items this pushbutton already
-  carries (S3's write-up) are unchanged by this ticket** --
-  `RebarHostData.GetFaces`/`GetCoverType`, `RebarBarType` diameter
-  properties, `pyrevit.forms.SelectFromList.show`'s signature, and which
-  `RebarFaceType` member actually addresses the beam's own side face.
-  This ticket introduces no new one.
+- **Superseded by issue #30 (Revit 2024 live probe):** `RebarHostData.
+  GetFaces`/`GetCoverType` and `RebarFaceType` did not exist; cover reads
+  now go through `read_beam_face_covers_mm` -- see
+  `docs/verification/issue-30-cover-face-reads.md`. `RebarBarType` diameter
+  properties and `pyrevit.forms.SelectFromList.show`'s signature remain
+  open.
 - **Whether the refusal genuinely fires BEFORE any Revit mutation in
-  practice** rests on the placement in the pushbutton's control flow
-  (verified by code reading: the check runs immediately after
-  `beam_section_dimensions_mm`/cover reads, before the continuous-run
-  guard, support detection, or `run_in_transaction`), not by executing it
-  against a live document.
+  practice** rests on the placement in the pushbutton's control flow. This
+  changed with issue #30: the ordering is now continuous-run guard, THEN
+  support detection (moved earlier so `cover_end` is only requested where
+  an end face actually exists), THEN the cover reads, THEN this spacing
+  refusal -- still before `run_in_transaction`, but no longer immediately
+  after `beam_section_dimensions_mm`/cover reads as originally described.
+  Verified by code reading only, not by executing it against a live
+  document.
 
 ## Review findings (all five fixed before commit)
 
