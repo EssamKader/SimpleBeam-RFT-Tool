@@ -429,10 +429,28 @@ class DetailBeamWindow(forms.WPFWindow):
         # #48 (U4) constraint 4: the ComboBox offers ONLY 1, 2, 4 -- type 3
         # is never an item to select, not merely refused after typing (A31,
         # R6). Default selection is stirrup type 1 (A36).
+        #
+        # #58: the items now SAY what each type is. Types 1 and 2 are the
+        # same closed loop and differ only in which top corner the hooks
+        # meet at, which no engineer can be expected to infer from "1" and
+        # "2" -- the project owner asked precisely this on first sight of
+        # the tool.
         self.closure_type_combo.ItemsSource = [
-            str(n) for n in ui_inputs.ALLOWED_CLOSURE_TYPES
+            label for _value, label in ui_inputs.CLOSURE_TYPE_CHOICES
         ]
         self.closure_type_combo.SelectedIndex = 0
+
+        # #58: section 6.3's per-face option, likewise named rather than
+        # numbered. v0.1.0's pushbutton said "1=single wide row,
+        # 2=stacked"; the single window shipped "(1/2, section 6.3)" and
+        # lost the meaning. Restored, and as a closed choice so an invalid
+        # option cannot be typed at all.
+        face_option_labels = [
+            label for _value, label in ui_inputs.FACE_OPTION_CHOICES
+        ]
+        for combo in (self.top_face_option_combo, self.bottom_face_option_combo):
+            combo.ItemsSource = face_option_labels
+            combo.SelectedIndex = 0
         # rft.core.guards.stirrup_type3_guard_message()'s OWN text, quoted
         # verbatim (this ticket's constraint 4) so the note on this tab
         # cannot drift from the guard it describes.

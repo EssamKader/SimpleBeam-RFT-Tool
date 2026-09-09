@@ -344,3 +344,35 @@ def test_dispatched_work_cannot_fail_silently():
     assert "forms.alert" in body and "status_tb" in body, (
         "a caught failure must be shown in the window, not only stored."
     )
+
+
+# --- a modeless window needs a persistent engine --------------------------
+
+BUNDLE_PATH = os.path.join(PUSHBUTTON_DIR, "bundle.yaml")
+
+
+def test_modeless_window_declares_a_persistent_engine():
+    """#59. The window is modeless, so its handlers run AFTER script.py
+    has returned. Without ``engine: persistent: true`` pyRevit tears the
+    IronPython engine down at that moment: the window survives as a CLR
+    object and a click handler can still write a TextBlock, but the
+    ExternalEvent carrying every Revit API call is raised into a dead
+    engine and never delivers.
+
+    The live symptom was "Pick beam -- waiting for Revit..." forever, with
+    no error anywhere, because the failure is UPSTREAM of the wrapper that
+    reports failures. Nothing in the suite could see it: the setting lives
+    in bundle.yaml, and until now no test read that file at all.
+
+    Coupled deliberately to the modeless check: these two must change
+    together or the button silently stops working.
+    """
+    import yaml
+
+    bundle = yaml.safe_load(io.open(BUNDLE_PATH, encoding="utf-8").read())
+    engine = bundle.get("engine") or {}
+    assert engine.get("persistent") is True, (
+        "bundle.yaml must declare engine.persistent: true -- the Detail "
+        "Beam window is modeless and its Revit API calls are delivered by "
+        "an ExternalEvent after the script returns (#59)."
+    )

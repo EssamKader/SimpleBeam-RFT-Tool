@@ -138,9 +138,53 @@ def test_layer_option_blank_rejected():
 
 
 def test_closure_type_accepts_1_2_4():
-    assert inputs.closure_type_from_label("1") == 1
-    assert inputs.closure_type_from_label("2") == 2
-    assert inputs.closure_type_from_label("4") == 4
+    """Labels are the DESCRIPTIVE strings the ComboBox is populated with
+    (#58), not the bare numerals. "1" and "2" alone told the engineer
+    nothing: the two are the same closed loop and differ only in which
+    top corner the hooks meet at.
+    """
+    for value, label in inputs.CLOSURE_TYPE_CHOICES:
+        assert inputs.closure_type_from_label(label) == value
+    assert set(inputs.ALLOWED_CLOSURE_TYPES) == set([1, 2, 4])
+
+
+def test_closure_type_labels_say_what_distinguishes_1_from_2():
+    """The whole point of the change. If a label ever loses the corner it
+    names, the dropdown is back to being unguessable.
+    """
+    by_value = dict(
+        (value, label) for value, label in inputs.CLOSURE_TYPE_CHOICES
+    )
+    assert "TOP-RIGHT" in by_value[1]
+    assert "TOP-LEFT" in by_value[2]
+    assert "open U" in by_value[4]
+
+
+def test_face_option_labels_say_what_1_and_2_mean():
+    """v0.1.0's pushbutton said "1=single wide row, 2=stacked"; the single
+    window shipped "(1/2, section 6.3)" and lost it. Guard the wording.
+    """
+    by_value = dict(
+        (value, label) for value, label in inputs.FACE_OPTION_CHOICES
+    )
+    assert inputs.face_option_from_label(by_value[1]) == 1
+    assert inputs.face_option_from_label(by_value[2]) == 2
+    assert "single wide row" in by_value[1]
+    assert "stacked" in by_value[2]
+    assert inputs.face_option_from_label(None) is None
+
+
+def test_a_label_that_is_not_offered_is_refused_not_guessed():
+    """The lookup must NOT fall back to reading the leading numeral.
+
+    A fallback would keep working if the ComboBox list and the choice
+    table ever drifted apart -- and would then return a value the
+    engineer never saw offered, which is precisely the silent failure a
+    closed set exists to prevent.
+    """
+    for bad in ("1", "1 -- closed loop", "3 -- nested double perimeter"):
+        with pytest.raises(ValueError):
+            inputs.closure_type_from_label(bad)
 
 
 def test_closure_type_none_selected_returns_none():
@@ -156,6 +200,10 @@ def test_closure_type_3_is_rejected_even_if_it_reaches_this_function():
     with pytest.raises(ValueError) as exc_info:
         inputs.closure_type_from_label("3")
     assert "3" in str(exc_info.value)
+    assert 3 not in inputs.ALLOWED_CLOSURE_TYPES
+    assert not [
+        label for value, label in inputs.CLOSURE_TYPE_CHOICES if value == 3
+    ]
 
 
 # --- try_parse_float (crack tab's h re-evaluation -- never raises) ---------

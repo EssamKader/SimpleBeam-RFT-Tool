@@ -34,7 +34,7 @@
                         <Button x:Name="pick_btn" Content="Pick beam..."
                                 HorizontalAlignment="Left" Padding="14,4" Margin="0,0,0,6"/>
                         <TextBlock x:Name="beam_status_tb" FontWeight="Bold"
-                                   Text="No beam picked yet." Margin="0,0,0,6"/>
+                                   Text="No beam picked yet." Margin="0,0,0,6" TextWrapping="Wrap"/>
                         <TextBlock x:Name="warnings_tb" Foreground="#FFB05A00"
                                    TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
@@ -42,20 +42,20 @@
  re-picking repopulates every field below and
  re-runs support detection (A35). -->
                         <StackPanel x:Name="geometry_panel" IsEnabled="False">
-                            <TextBlock Text="Geometry (read from the model)" FontWeight="Bold" Margin="0,4,0,4"/>
+                            <TextBlock Text="Geometry (read from the model)" FontWeight="Bold" Margin="0,4,0,4" TextWrapping="Wrap"/>
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="L (mm)"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Text="b (mm)"/>
-                                <TextBlock Grid.Row="0" Grid.Column="2" Text="h (mm)"/>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="L (mm)" TextWrapping="Wrap"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="b (mm)" TextWrapping="Wrap"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="h (mm)" TextWrapping="Wrap"/>
                                 <TextBox x:Name="l_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0"/>
                                 <TextBox x:Name="b_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0"/>
                                 <TextBox x:Name="h_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
@@ -68,14 +68,14 @@
  format None numerically: the rc5 crash). Side cover is a
  fifth read this module also exposes (section 6/7's horizontal
  dimensions) and is shown alongside for the same reason. -->
-                            <TextBlock Text="Covers (read from the beam's own faces, per face)" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock Text="Covers (read from the beam's own faces, per face)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                             <TextBlock x:Name="cover_top_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_bottom_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_side_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_start_end_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_end_end_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
-                            <TextBlock Text="Support detection, per end" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock Text="Support detection, per end" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                             <TextBlock x:Name="start_support_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="end_support_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
@@ -89,7 +89,7 @@
  each combo carries A34's required grade
  (role_picker_label), set from script.py so the wording can
  never drift from rft.core.grades' own mapping. -->
-                            <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" FontWeight="Bold" Margin="0,0,0,4"/>
+                            <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
 
                             <TextBlock x:Name="top_main_bar_label_tb" TextWrapping="Wrap" Margin="0,4,0,2" Text=""/>
                             <ComboBox x:Name="top_main_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
@@ -132,74 +132,74 @@
                         <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
                                    Text="Bar counts and layer counts per face SHIP BLANK (A44) -- the engineer states them, and the tool never re-splits what is entered. Everything else here ships with its rev 2 section 8.1/A36 default."/>
 
-                        <TextBlock Text="Top face" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Top face" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Top bar count per layer"/>
-                            <TextBlock x:Name="top_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of top layers"/>
-                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Top face option (1/2, section 6.3)"/>
-                            <TextBox x:Name="top_bar_count_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bars per layer, top face" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="top_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of top layers" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="How the top bars sit (section 6.3)" TextWrapping="Wrap"/>
+                            <TextBox x:Name="top_bar_count_tb" ToolTip="Ships BLANK on purpose (A44): you state the count, and the tool never re-splits it. Leaving it blank means this face is not detailed." Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
                             <TextBox x:Name="top_layers_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
-                            <TextBox x:Name="top_face_option_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text="1"/>
+                            <ComboBox x:Name="top_face_option_combo" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
                         </Grid>
 
-                        <TextBlock Text="Bottom face" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Bottom face" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="180"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bottom bar count per layer"/>
-                            <TextBlock x:Name="bottom_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of bottom layers"/>
-                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Bottom face option (1/2, section 6.3)"/>
-                            <TextBox x:Name="bottom_bar_count_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bars per layer, bottom face" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="bottom_layers_label_tb" Grid.Row="0" Grid.Column="1" Text="Number of bottom layers" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="How the bottom bars sit (section 6.3)" TextWrapping="Wrap"/>
+                            <TextBox x:Name="bottom_bar_count_tb" ToolTip="Ships BLANK on purpose (A44): you state the count, and the tool never re-splits it. Leaving it blank means this face is not detailed." Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
                             <TextBox x:Name="bottom_layers_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
-                            <TextBox x:Name="bottom_face_option_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text="1"/>
+                            <ComboBox x:Name="bottom_face_option_combo" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
                         </Grid>
 
-                        <TextBlock Text="Layout and anchorage" FontWeight="Bold" Margin="0,4,0,4"/>
+                        <TextBlock Text="Layout and anchorage" FontWeight="Bold" Margin="0,4,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="220"/>
-                                <ColumnDefinition Width="260"/>
-                                <ColumnDefinition Width="200"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Spacer diameter O_spacer (mm, clear gap)"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Max aggregate size D_agg (mm, blank = 50 mm fallback)"/>
-                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Section 6.2 min-spacing override (mm, blank = none)"/>
-                            <TextBox x:Name="spacer_dia_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text="16"/>
-                            <TextBox x:Name="d_agg_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
-                            <TextBox x:Name="min_spacing_override_tb" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text=""/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Clear gap between stacked layers (O_spacer, mm)" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Largest aggregate size (D_agg, mm) -- leave blank and 50 mm governs" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Raise the minimum bar spacing (mm) -- blank lets the tool decide" TextWrapping="Wrap"/>
+                            <TextBox x:Name="spacer_dia_tb" ToolTip="The CLEAR vertical gap between one layer and the next (rev 2 section 4.1). No spacer bar is placed by this tool -- the spec does not dimension one, and inventing it is prohibited." Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text="16"/>
+                            <TextBox x:Name="d_agg_tb" ToolTip="Minimum clear spacing = max(25 mm, bar diameter, 1.33 x D_agg) when you give D_agg. Leave it BLANK and a flat 50 mm governs instead (rev 2 section 6.2). Blank is the shipped default." Grid.Row="1" Grid.Column="1" Margin="0,2,6,0" Text=""/>
+                            <TextBox x:Name="min_spacing_override_tb" ToolTip="A FLOOR ONLY (A29): governing spacing = max(computed minimum, your value). It can make spacing stricter, never looser -- a value below the computed minimum is ignored entirely." Grid.Row="1" Grid.Column="2" Margin="0,2,0,0" Text=""/>
                         </Grid>
 
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="260"/>
-                                <ColumnDefinition Width="260"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock x:Name="ld_top_label_tb" Grid.Row="0" Grid.Column="0" Text="Top bar development length multiplier (LD_top)"/>
-                            <TextBlock x:Name="ld_btm_label_tb" Grid.Row="0" Grid.Column="1" Text="Bottom bar development length multiplier (LD_btm)"/>
+                            <TextBlock x:Name="ld_top_label_tb" Grid.Row="0" Grid.Column="0" Text="Top bar development length multiplier (LD_top)" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="ld_btm_label_tb" Grid.Row="0" Grid.Column="1" Text="Bottom bar development length multiplier (LD_btm)" TextWrapping="Wrap"/>
                             <TextBox x:Name="ld_top_mult_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text=""/>
                             <TextBox x:Name="ld_btm_mult_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text=""/>
                         </Grid>
@@ -216,23 +216,23 @@
  guard it quotes. -->
             <TabItem Header="Stirrups">
                 <StackPanel Margin="10">
-                    <TextBlock Text="Spacing" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Spacing" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                     <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="220"/>
-                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Dense spacing, supports (mm)"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Normal spacing, midspan (mm)"/>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Stirrup spacing near the supports (mm)" TextWrapping="Wrap"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Stirrup spacing at midspan (mm)" TextWrapping="Wrap"/>
                         <TextBox x:Name="dense_spacing_tb" Grid.Row="1" Grid.Column="0" Margin="0,2,6,0" Text="150"/>
                         <TextBox x:Name="normal_spacing_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text="200"/>
                     </Grid>
 
-                    <TextBlock Text="Closure type (section 7.2)" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Closure type (section 7.2)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
                     <ComboBox x:Name="closure_type_combo" HorizontalAlignment="Left" MinWidth="120" Margin="0,0,0,4"/>
                     <TextBlock x:Name="closure_type3_note_tb" Foreground="#FFB05A00"
                                TextWrapping="Wrap" Margin="0,0,0,0" Text=""/>
@@ -252,17 +252,17 @@
                 <StackPanel Margin="10">
                     <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
                                Text="Enabled only when h &gt; 700 mm (rev 2 section 5, strict). O_crack comes from the crack RebarBarType picker on Beam &amp; Materials -- no diameter is re-asked here."/>
-                    <TextBlock x:Name="crack_s_max_label_tb" Text="Max spacing between crack-bar layers, s_max (mm)"/>
+                    <TextBlock x:Name="crack_s_max_label_tb" Text="Max spacing between crack-bar layers, s_max (mm)" TextWrapping="Wrap"/>
                     <TextBox x:Name="crack_s_max_tb" HorizontalAlignment="Left" MinWidth="120" Margin="0,2,0,10" Text=""/>
 
-                    <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" FontWeight="Bold" Margin="0,0,0,2"/>
+                    <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" FontWeight="Bold" Margin="0,0,0,2" TextWrapping="Wrap"/>
                     <TextBlock x:Name="h_avail_tb" TextWrapping="Wrap" Text=""/>
                 </StackPanel>
             </TabItem>
 
             <TabItem Header="Review">
                 <StackPanel Margin="10">
-                    <TextBlock FontWeight="Bold" Text="Review -- placeholder"/>
+                    <TextBlock FontWeight="Bold" Text="Review -- placeholder" TextWrapping="Wrap"/>
                     <TextBlock TextWrapping="Wrap" Margin="0,6,0,10"
                                Text="The derived placement list and the full section/6.2-6.4/7/8.2 report are implemented by issue #50 (U6). This shell only builds the transaction boundary: pressing Place opens ONE Transaction (A46), calls into placement, and rolls back entirely on any exception -- which is guaranteed right now, since placement itself is not implemented yet."/>
                     <Button x:Name="place_btn" Content="Place" HorizontalAlignment="Left" Padding="18,6"/>
@@ -272,6 +272,6 @@
         </TabControl>
 
         <TextBlock x:Name="status_tb" Grid.Row="2" Margin="2,8,2,0"
-                   FontFamily="Consolas" Text="ready"/>
+                   FontFamily="Consolas" Text="ready" TextWrapping="Wrap"/>
     </Grid>
 </Window>

@@ -28,10 +28,31 @@ the constraints -- no f-strings, PEP 263 cookie above).
 # so "3" is never a choice to reject after the fact (this ticket's fourth
 # specified constraint) -- this tuple exists so the UI and this validation
 # cannot drift apart on what "allowed" means.
-ALLOWED_CLOSURE_TYPES = (1, 2, 4)
+# Closure types, with the wording the engineer actually reads. Types 1 and
+# 2 are THE SAME closed loop and differ only in which top corner the hooks
+# meet at (``stirrups.stirrup_curve_endpoints_mm``: start_corner is
+# "top_right" for 1 and "top_left" for 2) -- a difference that is
+# impossible to guess from the bare numerals "1" and "2", which is what
+# shipped in v0.2.0-rc2 and what the project owner flagged on sight.
+# Type 3 is absent by construction, not filtered later (A31, R6).
+CLOSURE_TYPE_CHOICES = (
+    (1, "1 -- closed loop, hooks meet at the TOP-RIGHT corner"),
+    (2, "2 -- closed loop, hooks meet at the TOP-LEFT corner"),
+    (4, "4 -- open U, no top leg, hooked free ends at both top corners"),
+)
+
+ALLOWED_CLOSURE_TYPES = tuple(value for value, _label in CLOSURE_TYPE_CHOICES)
+
+# Section 6.3's per-face option. Same problem, same fix: "1" and "2" carry
+# no meaning on their own, and v0.1.0's pushbutton actually SAID
+# "1=single wide row, 2=stacked" -- wording the single window dropped.
+FACE_OPTION_CHOICES = (
+    (1, "1 -- one single wide row (no stacking)"),
+    (2, "2 -- stacked rows, separated by a spacer bar"),
+)
 
 # section 6.3, A36: 1 = single wide row, 2 = stacked. No other value.
-ALLOWED_LAYER_OPTIONS = (1, 2)
+ALLOWED_LAYER_OPTIONS = tuple(value for value, _label in FACE_OPTION_CHOICES)
 
 
 def _stripped(text):
@@ -141,22 +162,44 @@ def parse_layer_option(text, field_label):
 
 
 def closure_type_from_label(label):
-    """Recovers the closure-type int from a ComboBox label built as
-    ``str(n)`` for ``n`` in ``ALLOWED_CLOSURE_TYPES`` (rev 2 section 7.2,
-    A31). The ComboBox itself offers only 1, 2 and 4 as items -- type 3 is
-    never an option to type or select, not merely refused after the fact
-    -- so this is a lookup against a closed set, not free-text parsing.
+    """Recovers the closure-type int from its descriptive ComboBox label
+    (rev 2 section 7.2, A31). The ComboBox offers only 1, 2 and 4 -- type
+    3 is never an item to select, not merely refused after the fact.
     Returns ``None`` if nothing is selected yet.
+    """
+    return _value_from_choice_label(
+        label, CLOSURE_TYPE_CHOICES, "closure type",
+        "rev 2 section 7.2, A31 -- type 3 is parked",
+    )
+
+
+def face_option_from_label(label):
+    """The section 6.3 per-face option behind a descriptive ComboBox
+    label. ``None`` when nothing is selected."""
+    return _value_from_choice_label(
+        label, FACE_OPTION_CHOICES, "face option", "rev 2 section 6.3, A36"
+    )
+
+
+def _value_from_choice_label(label, choices, what, spec_ref):
+    """Recover the integer behind a descriptive ComboBox label.
+
+    The label text is the SAME string the ComboBox was populated with, so
+    this is a lookup against a closed set, never free-text parsing. It
+    deliberately does NOT fall back to ``int(label.split()[0])``: that
+    would keep working if the two lists ever drifted apart, which is
+    exactly the silent failure the closed set exists to prevent.
     """
     if label is None:
         return None
-    value = int(label)
-    if value not in ALLOWED_CLOSURE_TYPES:
-        raise ValueError(
-            "closure type '{0}' is not one of {1} (rev 2 section 7.2, A31 "
-            "-- type 3 is parked).".format(label, ALLOWED_CLOSURE_TYPES)
+    for value, choice_label in choices:
+        if label == choice_label:
+            return value
+    raise ValueError(
+        "{0} '{1}' is not one of the offered choices ({2}).".format(
+            what, label, spec_ref
         )
-    return value
+    )
 
 
 def try_parse_float(text):

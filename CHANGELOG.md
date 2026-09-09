@@ -36,6 +36,75 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
 `rft.revit` import cleanly.
 
+## [v0.2.0-rc3] — 2026-09-10
+
+Two things the second live test found: the pick still did nothing, and the
+labels could not be understood or even fully read.
+
+### `Pick beam...` hung on "waiting for Revit..." (#58)
+
+rc2 made the window modeless and routed API calls through an
+`ExternalEvent`, which was right but **incomplete**. pyRevit tears down the
+IronPython engine when a script returns, and a modeless window's handlers
+run *after* that. The window survives — it is a CLR object, which is why the
+status line still updated — but the `ExternalEvent` was raised into a
+torn-down engine and never delivered. No error appeared anywhere, because
+the failure is upstream of the wrapper that reports failures.
+
+The fix is one setting in `bundle.yaml`:
+
+```yaml
+engine:
+  persistent: true
+```
+
+rc2 followed `Measure.pushbutton`'s **script** and not its **bundle.yaml**,
+where that setting lives. Reading the code and not the configuration is the
+whole of the mistake.
+
+### Labels the engineer could not read or interpret (#58)
+
+Reported on sight of the Main bars and Stirrups tabs:
+
+- **Labels were clipped mid-word** — "Max aggregate size D_agg (mm, blank =
+  50 mm f". Fixed columns with no wrapping; now star-width columns and
+  `TextWrapping` throughout.
+- **"Top face option (1/2, section 6.3)"** said nothing. `v0.1.0`'s
+  pushbutton actually said *"1=single wide row, 2=stacked"* and the single
+  window lost it — a clarity regression introduced by #48 and missed in
+  review, which compared the diff for correctness and never against the
+  working button's wording. It is now a **dropdown**: "one single wide row
+  (no stacking)" / "stacked rows, separated by a spacer bar".
+- **Closure type 1/2/4 was unguessable.** Types 1 and 2 are the *same*
+  closed loop and differ only in which top corner the hooks meet at. The
+  dropdown now says so: "closed loop, hooks meet at the TOP-RIGHT corner",
+  "…TOP-LEFT corner", "open U, no top leg, hooked free ends at both top
+  corners".
+- **`§6.2` min-spacing override** now reads "Raise the minimum bar spacing —
+  blank lets the tool decide", with a tooltip giving the actual rule: it is
+  a **floor only**, `max(computed, yours)`, so it can make spacing stricter
+  but never looser.
+- Tooltips added to the inputs whose rule cannot fit on one line: `D_agg`'s
+  two-branch formula, `O_spacer` being a clear gap with no spacer bar
+  placed, and why the bar counts ship blank.
+
+**Seeing** the stirrup shape rather than reading about it is #49's live
+sketch, which draws the section and will show the selected closure type
+directly. This candidate makes the words right; #49 makes them unnecessary.
+
+### Guards
+
+`bundle.yaml` is now read by a test at all — it never was, which is why a
+green suite said nothing about a button that could not work. That guard is
+coupled to the modeless check, since the two must change together. The
+closure and face-option labels are asserted to keep naming the corner and
+the stacking, and the label→value lookup deliberately refuses a label it did
+not offer rather than falling back to reading the leading numeral.
+
+315 tests pass.
+
+---
+
 ## [v0.2.0-rc2] — 2026-09-10
 
 Fixes the one defect rc1's live test found, on the first click.
