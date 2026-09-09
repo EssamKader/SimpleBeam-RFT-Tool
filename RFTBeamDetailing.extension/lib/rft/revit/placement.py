@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Builds the anchored-bar curve list and commits it inside one Transaction
 with rollback on failure.
 

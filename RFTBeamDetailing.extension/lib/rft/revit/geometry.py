@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Reads beam and support geometry from the model. No detailing math here --
 only Revit reads, converted to mm at the return boundary via the caller-
 supplied ``from_internal_units``/``to_internal_units`` (``rft.revit.units``).

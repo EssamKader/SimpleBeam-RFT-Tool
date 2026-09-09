@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Adapter layer for ``RebarBarType``/``RebarHookType`` enumeration and
 read-back (S7, issue #20; hook-angle and hook-style read-back, issue #25/
 A45; A42 per-role selection and grade-conflict guard, issue #27).

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Adapter for stirrup placement: converts core-computed centreline curve
 lists and zone arrays into Revit `Rebar.CreateFromCurves` /
 `RebarShapeDrivenAccessor.SetLayoutAsMaximumSpacing` calls.

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Revit-side detection for the S9 out-of-scope configuration guards.
 
 Detection only -- the policy (collinear-vs-transverse threshold, refuse-vs-

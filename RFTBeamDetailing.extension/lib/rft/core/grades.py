@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Role -> steel grade assignment (rev 2 section 1.1, A34) and the
 explicit-selection policy S7/A42 requires (issues #20, #27).
 

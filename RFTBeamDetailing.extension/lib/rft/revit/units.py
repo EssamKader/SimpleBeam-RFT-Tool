@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """The mm <-> Revit-internal-units boundary. The only place a value is
 allowed to cross between millimetres (used everywhere in ``rft.core``) and
 Revit's internal feet.

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Stirrup leg geometry, closure types and 3-zone distribution math.
 
 Pure Python: no Revit imports, no Revit types. Every value is a plain

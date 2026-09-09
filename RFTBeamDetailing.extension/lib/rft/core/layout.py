@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Main bar cross-section layout: layer offsets, corner-bar horizontal
 distribution, spacer bar length, and the R1 vertical-spacing warning.
 

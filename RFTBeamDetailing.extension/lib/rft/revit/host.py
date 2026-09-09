@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Host validation and per-face cover read-back.
 
 Rev 2 section 10: "Host validation order: RebarHostData.GetRebarHostData(beam)

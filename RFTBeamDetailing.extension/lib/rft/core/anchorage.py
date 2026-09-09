@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Development length and end-anchorage math for main bars.
 
 Pure Python: no Revit imports, no Revit types. Every value is a plain

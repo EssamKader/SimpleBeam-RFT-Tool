@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Out-of-scope configuration guards (S9): continuous-run detection, the
 cantilever/free-end warning, and the stirrup type 3 rejection.
 

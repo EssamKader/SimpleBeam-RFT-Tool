@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Crack / skin reinforcement for deep beams (rev 2 section 5; A22-A26 as
 amended by A42; residual question R2, resolved).
 
