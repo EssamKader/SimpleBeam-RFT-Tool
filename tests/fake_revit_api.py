@@ -520,25 +520,66 @@ class FakeWall(object):
         return None
 
 
-class FakeGeometryInstance(object):
-    """Stand-in for `Autodesk.Revit.DB.GeometryInstance` -- only used so
-    `rft.revit.geometry` (which imports the real type at module scope for
-    the rotation-aware column bounding box, issue #14 review finding #5)
-    remains importable under the fake environment.
+class FakeGeometryElement(object):
+    """Stand-in for `Autodesk.Revit.DB.GeometryElement`.
 
-    Exercised by tests/test_geometry.py for both the column support-width
-    path and the beam section datum (issue #18 review), but only from the
-    ``GetBoundingBox()``/``Transform`` pair onward: whether a real host
-    hands back a GeometryInstance at all cannot be mocked meaningfully
-    (see docs/verification/s5-stirrups.md).
+    VERIFIED LIVE (Revit 2024): this -- NOT ``GeometryInstance`` -- is
+    where ``GetBoundingBox()`` is declared, confirmed by reflection on the
+    live assembly.
+    """
+
+    def __init__(self, bbox=None):
+        self._bbox = bbox
+
+    def GetBoundingBox(self):
+        return self._bbox
+
+
+class FakeGeometryInstance(object):
+    """Stand-in for `Autodesk.Revit.DB.GeometryInstance`.
+
+    DELIBERATELY HAS NO ``GetBoundingBox()``. The real class does not
+    declare one -- verified live by reflection, its entire public surface
+    being GetSymbolGeometry / GetInstanceGeometry / Transform /
+    GetSymbolGeometryId / GetDocument -- and an earlier version of this
+    fake DID offer ``GetBoundingBox()``, which is why the test suite could
+    not see the failure coming. v0.1.0-rc4 raised
+    ``AttributeError: 'GeometryInstance' object has no attribute
+    'GetBoundingBox'`` on the live host while these tests were green.
+
+    That is the third time a fake modelled something the real API does not
+    provide (after ``RebarFaceType`` in issue #23 and ``.Name`` on an
+    ``ElementType`` in v0.1.0-rc3), so the shape is mirrored exactly now:
+    the local bbox is reachable only through ``GetSymbolGeometry()``, as it
+    is live.
+
+    ``local_bbox`` is kept as the constructor argument so existing tests
+    read unchanged -- they never called ``GetBoundingBox()`` directly, so
+    they now exercise the real two-step path for free.
+
+    VERIFIED LIVE for the values it stands in for: on both the 0-degree and
+    45-degree 300x900 beams, ``GetSymbolGeometry().GetBoundingBox()``
+    measures 9000 x 300 x 900 mm -- identical regardless of rotation --
+    while ``Transform.BasisX`` differs, (1, 0, 0) versus (0.7071, 0.7071, 0).
     """
 
     def __init__(self, local_bbox=None, transform=None):
-        self._local_bbox = local_bbox
+        self._symbol_geometry = FakeGeometryElement(local_bbox)
         self.Transform = transform
 
-    def GetBoundingBox(self):
-        return self._local_bbox
+    def GetSymbolGeometry(self):
+        return self._symbol_geometry
+
+    def GetInstanceGeometry(self):
+        """Present because the real class has it, and raising here states
+        the contract: this returns WORLD-space geometry, so using it for
+        the local bbox would reintroduce the rotation error that
+        ``_rotation_aware_local_bbox`` exists to avoid.
+        """
+        raise AssertionError(
+            "GetInstanceGeometry returns world-space geometry -- "
+            "_rotation_aware_local_bbox must use GetSymbolGeometry"
+        )
 
 
 def install():

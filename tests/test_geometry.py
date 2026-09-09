@@ -446,3 +446,54 @@ def test_find_supporting_element_returns_none_for_a_free_end(monkeypatch):
     found = find_supporting_element(doc=None, point=FakeXYZ(0, 0, 0), to_internal_units=lambda v: v)
 
     assert found is None
+
+
+# --- The GeometryInstance surface (v0.1.0-rc4 defect) ----------------------
+#
+# rc4 raised this on the live host with every test in this file green:
+#     AttributeError: 'GeometryInstance' object has no attribute
+#     'GetBoundingBox'
+# GetBoundingBox is declared on GeometryElement, not on GeometryInstance.
+# Verified by reflection on the live assembly: GeometryInstance's whole
+# public surface is GetSymbolGeometry / GetInstanceGeometry / Transform /
+# GetSymbolGeometryId / GetDocument.
+
+
+def test_fake_geometry_instance_offers_no_getboundingbox():
+    """The fake must withhold what the real class withholds.
+
+    The previous fake DID offer ``GetBoundingBox()``, which is precisely
+    why these tests passed while the button failed. Restoring that
+    convenience would turn the suite green over broken code again, so its
+    absence is asserted rather than left to habit.
+    """
+    instance = FakeGeometryInstance(local_bbox=object(), transform=object())
+    assert not hasattr(instance, "GetBoundingBox")
+    assert hasattr(instance, "GetSymbolGeometry")
+
+
+def test_local_bbox_is_read_from_symbol_geometry_not_instance_geometry():
+    """``GetInstanceGeometry`` returns WORLD-space geometry.
+
+    Using it for the local bounding box would reintroduce the exact
+    rotation error ``_rotation_aware_local_bbox`` exists to avoid -- a
+    300 mm wide beam at 45 degrees measuring 6576 mm, the (b + L)/sqrt(2)
+    signature issue #18's review predicted analytically and the live host
+    then measured. The fake raises ``AssertionError`` if
+    ``GetInstanceGeometry`` is called, so passing this proves the adapter
+    took the symbol-space route rather than merely returning a
+    plausible-looking number.
+    """
+    from rft.revit.geometry import _rotation_aware_local_bbox
+
+    local_bbox = _LocalBBox((-150.0, -450.0), (150.0, 450.0))
+    transform = _Transform(FakeXYZ(1, 0, 0), FakeXYZ(0, 1, 0))
+    geometry_instance = FakeGeometryInstance(local_bbox=local_bbox, transform=transform)
+    column = _Column(
+        location_point=FakeXYZ(0, 0, 0), geometry_instances=[geometry_instance]
+    )
+
+    got_bbox, got_transform = _rotation_aware_local_bbox(column)
+
+    assert got_bbox is local_bbox
+    assert got_transform is transform

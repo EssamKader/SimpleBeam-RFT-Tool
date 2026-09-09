@@ -245,19 +245,50 @@ def _rotation_aware_local_bbox(element):
     exactly the same rotation problem, and a 250x6000 beam at 45 deg
     otherwise measures b = 6250 mm (= b + L).
 
-    UNVERIFIED AGAINST A LIVE HOST: whether `FamilyInstance.get_Geometry()`
-    reliably yields a `GeometryInstance` wrapping symbol-space geometry for
-    a structural column, girder or beam (vs. already-transformed `Solid`s,
-    which some families/`Options` combinations return directly) has not
-    been confirmed without a real model. Issue #15 (S2) reuses this
-    unchanged for girders (same category shape as a column/beam, a
-    `FamilyInstance`); it does NOT apply to walls, which take the separate
-    `Wall.Width` path in `support_width_along_axis_mm` and never call this.
+    VERIFIED LIVE (Revit 2024, ``RevitAPI 24.3.40.0``), on both the
+    0-degree and the 45-degree 300x900 beam:
+
+    - ``FamilyInstance.get_Geometry(Options())`` DOES yield a
+      ``GeometryInstance`` for a structural framing element -- exactly one,
+      alongside two ``Solid``s. Both forms are present, so the earlier
+      worry that some families return already-transformed ``Solid``s
+      *instead* is half right: they are returned *as well*. Taking the
+      first ``GeometryInstance`` is unambiguous because there is only one.
+    - ``GeometryInstance.GetSymbolGeometry()`` returns the SYMBOL-space
+      (un-rotated) ``GeometryElement``, whose ``GetBoundingBox()`` measures
+      dx=9000.0, dy=300.0, dz=900.0 mm on **both** beams -- identical
+      regardless of plan rotation, which is precisely the property this
+      function exists to obtain.
+    - ``GeometryInstance.Transform`` carries the rotation: ``BasisX`` is
+      (1, 0, 0) on the 0-degree beam and (0.7071, 0.7071, 0) on the
+      45-degree one.
+
+    ``GeometryInstance`` HAS NO ``GetBoundingBox()`` -- confirmed by
+    reflection on the live assembly, and it is the reason v0.1.0-rc4 raised
+    ``AttributeError: 'GeometryInstance' object has no attribute
+    'GetBoundingBox'`` here. ``GetBoundingBox()`` is declared on
+    ``GeometryElement``, not on ``GeometryInstance``; the instance's whole
+    public surface is ``GetSymbolGeometry`` / ``GetInstanceGeometry`` /
+    ``Transform`` / ``GetSymbolGeometryId`` / ``GetDocument``. Note the
+    distinction that matters: ``GetInstanceGeometry()`` would return
+    geometry already transformed into world space, which would reintroduce
+    the exact rotation error this function was written to avoid.
+
+    Issue #15 (S2) reuses this unchanged for girders (same category shape
+    as a column/beam, a `FamilyInstance`); it does NOT apply to walls,
+    which take the separate `Wall.Width` path in
+    `support_width_along_axis_mm` and never call this.
     """
     options = Options()
     for geom_obj in element.get_Geometry(options):
         if isinstance(geom_obj, GeometryInstance):
-            local_bbox = geom_obj.GetBoundingBox()
+            # GetSymbolGeometry, never GetInstanceGeometry: the former is
+            # symbol space (un-rotated), the latter is already transformed
+            # into world space and would defeat the entire purpose here.
+            symbol_geometry = geom_obj.GetSymbolGeometry()
+            if symbol_geometry is None:
+                continue
+            local_bbox = symbol_geometry.GetBoundingBox()
             if local_bbox is not None:
                 return local_bbox, geom_obj.Transform
     return None, None
