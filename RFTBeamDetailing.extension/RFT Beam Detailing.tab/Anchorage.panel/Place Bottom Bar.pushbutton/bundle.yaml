@@ -1,0 +1,15 @@
+title: "Place Bottom\nBar"
+tooltip: >-
+  S1 tracer bullet -- places ONE bottom main bar, anchored at both ends
+  (rev 2 section 2.2/2.3). This is the smallest useful check that a beam's
+  setup (host validity, cover, supports) works before running the full
+  Main Bars pushbutton on it.
+
+  Requires both beam ends to have a detected support (column, wall or
+  girder) -- REFUSES otherwise, and also REFUSES if a collinear beam is
+  detected at either end, which would make this a continuous run rather
+  than a single simply-supported span (rev 2 section 9 item 2).
+
+  Prompts for the bottom bar's RebarBarType selection and an LD_btm
+  multiplier. See specs/beam-rft-detailing.md S1 and GitHub issue #14.
+author: Essam Kader

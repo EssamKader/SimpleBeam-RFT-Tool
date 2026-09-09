@@ -1,0 +1,26 @@
+title: "Place Main\nBars"
+tooltip: >-
+  Places the full top and bottom main bar layers (rev 2 section 4 layer
+  offsets, section 6.1 corner-bar distribution) with full end anchorage at
+  both faces (rev 2 section 2, any support type, each end handled
+  independently -- an unsupported end gets a straight run with a warning
+  instead of a hook).
+
+  Runs the section 6.2-6.4 spacing validation before placing anything and
+  REFUSES on a violation rather than silently restacking the bars into
+  more layers (A44) -- it names the governing minimum spacing, the
+  achieved spacing, and the maximum bar count or layer count that would
+  pass instead.
+
+  Needs THREE RebarBarType selections: top main bar, bottom main bar, and
+  a stirrup type -- the stirrup type positions the main bars (its diameter
+  feeds the layer offsets and corner-bar inset) but this pushbutton does
+  NOT place any stirrup; use "Place Stirrups" separately for that with a
+  matching stirrup type.
+
+  REFUSES if a collinear beam is detected at either end (continuous run,
+  rev 2 section 9 item 2), or if BOTH ends lack a detected support. A
+  single unsupported end is a WARNING, not a refusal -- that end takes
+  section 2.5's straight, no-hook run (A12/A14).
+  See specs/beam-rft-detailing.md S2/S3 and GitHub issues #15/#16.
+author: Essam Kader
