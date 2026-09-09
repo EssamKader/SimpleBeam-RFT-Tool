@@ -144,9 +144,15 @@ transaction. Tab *contents* are U3–U6.
 
 **Acceptance criteria**
 
-- [ ] One pushbutton, `Detail Beam`, replacing `Place Main Bars`,
-  `Place Stirrups` and `Place Crack Bars`. **The three old pushbuttons and
-  `Spike.panel` are deleted in this story** (A46, A47, #42).
+- [ ] One pushbutton, `Detail Beam`, **added alongside** the existing
+  `Place Main Bars`, `Place Stirrups` and `Place Crack Bars` (A46, A47).
+- [ ] **Nothing is deleted in this story.** The three pushbuttons and
+  `Spike.panel` stay until the single window has been verified on a live
+  host — see **U11** (#55). The ribbon carries both temporarily, and that is
+  intended: the three buttons are the only *verified* tool (`v0.1.0`), so
+  while the new window's Place button is still a stub the tool as a whole is
+  never broken. They do not conflict at runtime — separate `*.pushbutton`
+  folders, loaded independently, sharing `lib/rft/` read-only.
 - [ ] `forms.WPFWindow` loading a XAML **file** by bare filename from the
   pushbutton folder. A plain `TabControl` — proven by the #42 spike, so the
   `Expander` fallback in `docs/research/ui-wpf-hosting.md` is **not** needed.
@@ -411,6 +417,43 @@ window opens, so "filled in" cannot mean "has values". The rule:
 
 ---
 
+## U11 — Retire the three pushbuttons
+
+> **As** the maintainer, **I want** the old pushbuttons removed only once the
+> single window has replaced them in practice, **so that** the engineer is
+> never left without a tool that is known to work.
+
+Split out of U2 on the project owner's instruction (2026-09-09): *"I
+recommend not deleting three buttons until we test single UI, if they do not
+affect each other."* They do not affect each other, so there is no reason to
+delete early and one good reason not to.
+
+**Acceptance criteria**
+
+- [ ] `Place Main Bars`, `Place Stirrups`, `Place Crack Bars` and
+  `Spike.panel` deleted.
+- [ ] **Blocked until the single window has placed correct reinforcement on
+  a live host** — on both the 0° and the 45° beam, with the results compared
+  against what the old buttons produce for the same inputs. That comparison
+  is the point of keeping them: it is a direct A/B check that the rework
+  changed the interface and not the detailing.
+- [ ] The `Detail Beam` window is the only reinforcement command left, per
+  A46/A47.
+- [ ] No dead code or commented-out remnants left behind; the old logic
+  stays available through git history and the `v0.1.0` tag.
+
+**Known cost of deferring, accepted deliberately:** U1 (`GuardMessage`
+severity) and U9 (message text) touch guard construction sites, some of
+which live in the pushbuttons this story deletes. Doing those before U11
+means editing call sites that are about to disappear. Sequence U1 and U9
+*after* U11 where practical, or accept the duplicated edit — but do not
+resolve the tension by deleting the buttons early.
+
+**Depends on:** U2, U3, U4, U6 — and on live-host verification, which is a
+human step, not an agent one.
+
+---
+
 ## Dependency order
 
 ```
@@ -418,6 +461,9 @@ U0 (core additions) ─┐
 U1 (severity) ───────┼─> U2 (shell) ─┬─> U3 ─> U4 ─> U6 ─> U10
                      │               ├─> U5 ─> U7
                      └───────────────┴─> U8 ─> U9
+
+                       U11 (retire the old buttons) <- U2, U3, U4, U6
+                       + live-host verification, a human step
 ```
 
 U0 and U1 are pure refactors with no visible change and can be done in any
