@@ -298,3 +298,54 @@ def test_zone_layout_flags_claim_each_boundary_exactly_once():
     assert ZONE_LAYOUT_FLAGS["zone1"] == (True, True)
     assert ZONE_LAYOUT_FLAGS["zone2"] == (False, False)
     assert ZONE_LAYOUT_FLAGS["zone3"] == (True, True)
+
+
+# --- outer_leg_dimensions_mm (issue #44 / A48) -----------------------------
+
+
+def test_outer_leg_dimensions_inset_the_section_by_the_cover_only():
+    """OUTER = (b - 2*Cover) x (h - 2*Cover), §7.1/A30.
+
+    No diameter term: cover is measured to the stirrup's outer face, so the
+    outer rectangle IS the section inset by the cover.
+    """
+    from rft.core.stirrups import outer_leg_dimensions_mm
+
+    assert outer_leg_dimensions_mm(300.0, 900.0, 25.0) == (250.0, 850.0)
+
+
+def test_outer_rectangle_is_one_stirrup_diameter_larger_than_the_centreline():
+    """The two A30 rectangles must stay in step.
+
+    The centreline sits half a diameter inside the outer face on each of two
+    opposing sides, so each dimension differs by exactly one full diameter.
+    If these two functions ever disagree, the sketch and the placed stirrup
+    disagree -- which is the failure A48 exists to prevent.
+    """
+    from rft.core.stirrups import (
+        centreline_leg_dimensions_mm,
+        outer_leg_dimensions_mm,
+    )
+
+    b_mm, h_mm, cover_mm, dia_mm = 300.0, 900.0, 25.0, 10.0
+    ow, oh = outer_leg_dimensions_mm(b_mm, h_mm, cover_mm)
+    cw, ch = centreline_leg_dimensions_mm(b_mm, h_mm, cover_mm, dia_mm)
+
+    assert ow - cw == dia_mm
+    assert oh - ch == dia_mm
+
+
+def test_outer_rectangle_is_not_what_the_api_receives():
+    """Guard against substitution.
+
+    Rebar.CreateFromCurves receives the CENTRELINE rectangle. This asserts
+    the two are distinct for any non-zero diameter, so a future edit that
+    swapped one for the other cannot pass silently.
+    """
+    from rft.core.stirrups import (
+        centreline_leg_dimensions_mm,
+        outer_leg_dimensions_mm,
+    )
+
+    assert outer_leg_dimensions_mm(300.0, 900.0, 25.0) != \
+        centreline_leg_dimensions_mm(300.0, 900.0, 25.0, 10.0)

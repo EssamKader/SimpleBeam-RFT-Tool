@@ -31,6 +31,30 @@ def centreline_leg_dimensions_mm(b_mm, h_mm, cover_mm, stirrup_dia_mm):
     return width_mm, height_mm
 
 
+def outer_leg_dimensions_mm(b_mm, h_mm, cover_mm):
+    """OUTER rectangle of the stirrup (§7.1, A30):
+
+        OUTER = (b - 2*Cover) x (h - 2*Cover)
+
+    Cover is measured to the stirrup's OUTER face, so this is simply the
+    concrete section inset by the cover on all four sides -- no diameter
+    term, unlike ``centreline_leg_dimensions_mm``, which subtracts one full
+    stirrup diameter per dimension to reach the bar centreline.
+
+    NOT passed to the Revit API: ``Rebar.CreateFromCurves`` receives the
+    CENTRELINE rectangle, and this function must never be substituted for
+    it. It exists because A30 defines both rectangles and the SKETCH draws
+    the outer one, and A48 forbids the renderer from computing any dimension
+    itself -- a number the drawing needs is added here rather than derived
+    in the renderer, so the drawing and the placement cannot disagree.
+
+    The arithmetic is trivial, which is precisely the trap this closes: an
+    inline ``b - 2*cover`` in the renderer would be a §7.1 rule living
+    outside the core, free to drift from it.
+    """
+    return b_mm - 2.0 * cover_mm, h_mm - 2.0 * cover_mm
+
+
 _CORNER_ORDER = ("top_right", "top_left", "bottom_left", "bottom_right")
 
 

@@ -50,6 +50,36 @@ def layer_offset_mm(cover_mm, stirrup_dia_mm, bar_dia_mm, spacer_dia_mm, layer_n
     return offset_1 + (layer_n - 1) * (bar_dia_mm + spacer_dia_mm)
 
 
+def main_layer_v_positions_mm(h_mm, layer_offsets_mm, is_top):
+    """Centroid-local ``v`` positions of one face's main-bar layers, in the
+    order ``layer_offsets_mm`` is given.
+
+    §4 measures a layer offset INWARD from its own face, to the bar's
+    centreline. The section frame has ``v`` positive UP with the origin at
+    the section centroid, so:
+
+        top face     v = +h/2 - offset      (offset measured downward)
+        bottom face  v = -h/2 + offset      (offset measured upward)
+
+    The mirror-image sign is the whole content of this function, and getting
+    it backwards places a face's bars outside the concrete -- which is why
+    it belongs in one tested place rather than being written out at each
+    call site.
+
+    This is the main-bar counterpart of
+    ``rft.core.crack_bars.crack_layer_v_positions_mm``. That one lived in
+    the core from the start while this arithmetic sat inline in the
+    "Place Main Bars" pushbutton; the asymmetry meant a second consumer --
+    the sketch renderer (A48) -- would have had to reimplement the main-bar
+    case while importing the crack-bar case, which is exactly how a drawing
+    and the bars it depicts drift apart.
+    """
+    half_h_mm = h_mm / 2.0
+    if is_top:
+        return [half_h_mm - offset_mm for offset_mm in layer_offsets_mm]
+    return [-half_h_mm + offset_mm for offset_mm in layer_offsets_mm]
+
+
 def spacer_length_mm(b_mm, cover_mm, stirrup_dia_mm):
     """spacer_length = b - 2*Cover - 2*O_stirrup (§6.3).
 

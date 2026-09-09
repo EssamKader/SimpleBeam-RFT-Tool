@@ -71,6 +71,7 @@ from rft.core.layout import (
     MAX_LAYERS,
     corner_bar_u_positions_mm,
     layer_offset_mm,
+    main_layer_v_positions_mm,
     spacer_diameter_warning,
     spacer_length_mm,
 )
@@ -718,19 +719,11 @@ def main():
         b_start_internal = mm_to_internal(b_start_mm) if b_start_mm is not None else None
         b_end_internal = mm_to_internal(b_end_mm) if b_end_mm is not None else None
 
-        for layer_offset_val_mm in layer_offsets_mm:
-            if is_top:
-                # Top-face layer offsets are measured DOWN from the top
-                # face (§4): the top face sits at +h/2 above the section
-                # centroid, so the layer's v coordinate is h/2 MINUS the
-                # offset -- the mirror image of the bottom-face case below,
-                # where the offset is ADDED to -h/2.
-                v_mm = (h_mm / 2.0) - layer_offset_val_mm
-            else:
-                # Bottom layer offsets are measured UP from the bottom
-                # face, so the layer's v coordinate (centred on the
-                # section centroid) is -h/2 PLUS the offset.
-                v_mm = -(h_mm / 2.0) + layer_offset_val_mm
+        # The +h/2 - offset / -h/2 + offset mirror lives in the core
+        # (§4), not here: the sketch renderer needs the same positions, and
+        # two copies of this sign convention is how a drawing and the bars
+        # it depicts drift apart (A48, issue #44).
+        for v_mm in main_layer_v_positions_mm(h_mm, layer_offsets_mm, is_top):
             for u_mm in u_positions_mm:
                 bar_ref_start = bar_point_at_uv(
                     ref_start, u_dir, v_dir, du_internal, dv_internal, u_mm, v_mm, mm_to_internal

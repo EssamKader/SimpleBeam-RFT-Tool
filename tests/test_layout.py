@@ -206,3 +206,66 @@ def test_spacer_warning_takes_the_resolved_minimum_so_the_fallback_can_reach_it(
     msg = spacer_diameter_warning(spacer_dia_mm=16.0, min_horizontal_mm=fallback_mm)
     assert msg is not None
     assert "50.0" in msg
+
+
+# --- main_layer_v_positions_mm (issue #44 / A48) ---------------------------
+
+
+def test_main_layer_v_positions_mirror_between_top_and_bottom():
+    """The sign convention is the entire content of the function.
+
+    Section frame: v positive UP, origin at the section centroid. A top-face
+    offset is measured DOWNWARD from +h/2, a bottom-face offset UPWARD from
+    -h/2. Getting this backwards places a face's bars outside the concrete,
+    which is why it lives in one tested place instead of at each call site.
+    """
+    from rft.core.layout import main_layer_v_positions_mm
+
+    offsets = [43.0, 75.0]
+    top = main_layer_v_positions_mm(900.0, offsets, is_top=True)
+    btm = main_layer_v_positions_mm(900.0, offsets, is_top=False)
+
+    assert top == [450.0 - 43.0, 450.0 - 75.0]
+    assert btm == [-450.0 + 43.0, -450.0 + 75.0]
+    # exact mirror image about the centroid
+    assert top == [-v for v in btm]
+
+
+def test_main_layer_v_positions_preserve_input_order():
+    """Callers zip these against the layer offsets they passed in, so a
+    reordering would silently pair a layer with another layer's position."""
+    from rft.core.layout import main_layer_v_positions_mm
+
+    offsets = [75.0, 43.0, 107.0]
+    got = main_layer_v_positions_mm(900.0, offsets, is_top=False)
+    assert got == [-450.0 + o for o in offsets]
+
+
+def test_main_layer_v_positions_stay_inside_the_section():
+    """A layer offset smaller than h/2 must land inside the concrete."""
+    from rft.core.layout import first_layer_offset_mm, main_layer_v_positions_mm
+
+    h_mm = 900.0
+    offset = first_layer_offset_mm(25.0, 10.0, 16.0)
+    for is_top in (True, False):
+        for v in main_layer_v_positions_mm(h_mm, [offset], is_top):
+            assert -h_mm / 2.0 < v < h_mm / 2.0
+
+
+def test_main_layer_v_positions_matches_the_crack_bar_convention():
+    """Its crack-bar counterpart already lived in the core; the two must
+    agree about which way is up, or the sketch would draw main bars and
+    crack bars in different frames."""
+    from rft.core.crack_bars import crack_layer_v_positions_mm
+    from rft.core.layout import main_layer_v_positions_mm
+
+    h_mm, offset_btm = 900.0, 43.0
+    crack_first = crack_layer_v_positions_mm(h_mm, offset_btm, 1, 100.0)[0]
+    main_btm = main_layer_v_positions_mm(h_mm, [offset_btm + 100.0], False)[0]
+    assert crack_first == main_btm
+
+
+def test_main_layer_v_positions_handles_an_empty_layer_list():
+    from rft.core.layout import main_layer_v_positions_mm
+
+    assert main_layer_v_positions_mm(900.0, [], is_top=True) == []
