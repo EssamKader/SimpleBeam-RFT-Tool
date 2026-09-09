@@ -19,3 +19,16 @@ Thumbs.db
 
 # Extracted docx scratch content
 00.Technical Material/_extracted/
+
+# Revit models, families and templates -- LOCAL TEST FIXTURES ONLY, never upload.
+# The verification model (RFT_V1_CONTROL) lives on the engineer's machine; the
+# repo records what was measured against it (docs/verification/), not the model.
+*.rvt
+*.rfa
+*.rte
+*.rft
+*_backup/
+*.rvt.bak
+*.slog
+*.dwlx
+*.dwl2
