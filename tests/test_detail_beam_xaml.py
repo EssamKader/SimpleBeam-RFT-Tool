@@ -421,3 +421,32 @@ def test_the_unconditional_required_roles_list_is_gone():
         "stirrup BAR type is needed by every section (layer offsets, "
         "crack-bar positions), the stirrup HOOK only by stirrups."
     )
+
+
+# --- the report and the placer must share one computation ----------------
+
+
+def test_report_and_placement_both_use_the_shared_plan():
+    """#56. The Review report describes what Place will build. If the two
+    compute their numbers separately -- even from the same correct core
+    functions -- they can be handed different arguments and neither would
+    notice, and the report would describe a beam the model did not get.
+
+    Both must go through rft.core.plan, which is where those numbers are
+    computed once and tested (tests/test_core_plan.py).
+    """
+    for method in ("_report_one_main_face", "_build_placement_plans"):
+        body = _method_body(method)
+        assert "core_plan." in body, (
+            "%s must obtain its dimensions from rft.core.plan, not compute "
+            "them itself -- otherwise the report and the placed steel can "
+            "disagree (#56)." % method
+        )
+
+
+def test_the_placement_stub_is_gone():
+    """#56 removed it. A NotImplementedError left behind unreachable would
+    be a claim the tool cannot place, which is no longer true.
+    """
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    assert "raise NotImplementedError" not in text

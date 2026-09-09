@@ -63,12 +63,9 @@ from pyrevit import forms, revit, script
 from rft.core.anchorage import (
     DEFAULT_LD_BTM_MULTIPLIER,
     DEFAULT_LD_TOP_MULTIPLIER,
-    bottom_bar_anchorage,
     development_length,
     free_end_configuration_warning,
-    top_bar_anchorage,
     top_bottom_clearance_warning,
-    unsupported_end_anchorage,
 )
 from rft.core.crack_bars import (
     DEFAULT_S_MAX_MM,
@@ -83,11 +80,8 @@ from rft.core.crack_bars import (
 from rft.core.guards import stirrup_type3_guard_message
 from rft.core.layout import (
     MAX_LAYERS,
-    corner_bar_u_positions_mm,
     layer_offset_mm,
-    main_layer_v_positions_mm,
     spacer_diameter_warning,
-    spacer_length_mm,
 )
 from rft.core.grades import (
     ROLE_BOTTOM_MAIN,
@@ -120,13 +114,18 @@ from rft.revit.bar_types import (
     hook_type_options,
     list_stirrup_hook_types,
 )
+from rft.core import plan as core_plan
 from rft.revit.geometry import (
     beam_axis_direction,
     beam_endpoints,
     beam_section_axes,
+    beam_section_centre_offsets,
     beam_section_dimensions_mm,
+    end_support_face_point,
     find_supporting_element,
+    point_at_cc_offset,
     span_length_mm,
+    start_support_face_point,
     support_width_along_axis_mm,
 )
 from rft.revit.guards import continuous_run_guard
@@ -136,7 +135,19 @@ from rft.revit.host import (
     read_support_side_cover_mm,
     validate_rebar_host,
 )
-from rft.revit.placement import run_in_transaction
+from rft.revit.placement import (
+    bar_point_at_uv,
+    bend_plane_normal,
+    build_main_bar_curves,
+    main_bar_end_geometry,
+    place_anchored_bar,
+    run_in_transaction,
+)
+from rft.revit.stirrups import (
+    apply_maximum_spacing_layout,
+    build_stirrup_curves,
+    place_stirrup,
+)
 from rft.revit.units import internal_to_mm, mm_to_internal
 from rft.ui import derivation as ui_derivation
 from rft.ui import inputs as ui_inputs
@@ -825,6 +836,16 @@ class DetailBeamWindow(forms.WPFWindow):
             l_mm = span_length_mm(support_start, support_end, internal_to_mm)
 
         return {
+            # The support ELEMENTS, not just their measurements: placement
+            # needs them for the support-face reference points and for the
+            # stirrup zones' centre-to-centre datum. Returned from the same
+            # detection pass the report uses so the two cannot disagree
+            # about which element supports which end (#56).
+            "support_start": support_start,
+            "support_end": support_end,
+            "start_pt": start_pt,
+            "end_pt": end_pt,
+            "axis": axis,
             "b_mm": b_mm, "h_mm": h_mm,
             "cover_top_mm": self.beam_covers_mm.top_mm,
             "cover_btm_mm": self.beam_covers_mm.bottom_mm,
@@ -839,24 +860,6 @@ class DetailBeamWindow(forms.WPFWindow):
             "support_cover_end_mm": support_cover_end_mm,
             "l_mm": l_mm,
         }
-
-    def _end_anchorage_result(self, is_supported, support_width_mm, support_cover_mm,
-                               dia_own_mm, dia_other_mm, ld_mm, is_top, cover_end_mm, end_label):
-        """Ported from "Place Main Bars.pushbutton"'s own ``end_anchorage``
-        nested helper: a=formula/capped result at a supported end (§2.1-
-        §2.3), or a straight run to ``beam end - cover`` with no hook at an
-        unsupported one (§2.5, A12, R3). Returns (a_mm, b_mm_or_None,
-        warning_or_None).
-        """
-        if is_supported:
-            if is_top:
-                result = top_bar_anchorage(support_width_mm, support_cover_mm, dia_other_mm, ld_mm)
-            else:
-                result = bottom_bar_anchorage(support_width_mm, support_cover_mm, ld_mm)
-            return result.a, result.b, None
-        result = unsupported_end_anchorage(0.0, ld_mm, terminates_short_of_end_mm=cover_end_mm)
-        warning = "{}: {}".format(end_label, result.warning) if result.warning else None
-        return result.achieved_length_mm, None, warning
 
     def _format_end_result(self, a_mm, b_mm):
         """Ported verbatim (wording) from "Place Main Bars.pushbutton"."""
@@ -980,26 +983,32 @@ class DetailBeamWindow(forms.WPFWindow):
         for g in spacing_report.guard_messages:
             lines.append("  - **REFUSED (section 6.2-6.4):** {}".format(g.message))
 
+        # #56: the SAME plan objects the placer executes. The report used
+        # to recompute these three quantities itself, from the same core
+        # functions -- correct, and still able to drift, because two call
+        # sites can be given different arguments and neither would notice.
+        # Now there is one computation and the report is its formatter.
         cover_mm = geometry["cover_top_mm"] if is_top else geometry["cover_btm_mm"]
-        layer_offsets_mm = [
-            layer_offset_mm(cover_mm, dia_stirrup_mm, dia_own_mm, spacer_dia_mm, n)
-            for n in range(1, layers + 1)
-        ]
-        v_positions_mm = main_layer_v_positions_mm(geometry["h_mm"], layer_offsets_mm, is_top)
-        for n, (offset_mm, v_mm) in enumerate(zip(layer_offsets_mm, v_positions_mm), start=1):
-            lines.append("  - layer {}: offset_{} = {:.1f} mm, v = {:.1f} mm".format(n, n, offset_mm, v_mm))
-
         try:
-            u_positions_mm = corner_bar_u_positions_mm(
-                geometry["b_mm"], geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm, count
-            )
-            lines.append(
-                "  - corner-bar u positions ({} bars): {}".format(
-                    count, ", ".join("{:.1f}".format(u) for u in u_positions_mm)
-                )
+            layer_plans = core_plan.face_layer_plans(
+                is_top, geometry["h_mm"], geometry["b_mm"], cover_mm,
+                geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm,
+                spacer_dia_mm, count, layers,
             )
         except ValueError as ex:
-            lines.append("  - corner-bar positions: {}".format(ex))
+            lines.append("  - Cannot compute {} face layout: {}".format(
+                face_label.lower(), ex))
+            return lines
+
+        for layer in layer_plans:
+            lines.append("  - layer {}: offset_{} = {:.1f} mm, v = {:.1f} mm".format(
+                layer.layer_n, layer.layer_n, layer.offset_mm, layer.v_mm))
+        lines.append(
+            "  - corner-bar u positions ({} bars): {}".format(
+                count,
+                ", ".join("{:.1f}".format(u) for u in layer_plans[0].u_positions_mm),
+            )
+        )
 
         if layers > 1:
             r1_min_mm = governing_min_spacing_mm(dia_own_mm, d_agg_mm)
@@ -1007,39 +1016,45 @@ class DetailBeamWindow(forms.WPFWindow):
             if spacer_warning:
                 lines.append("  - **R1 warning:** {}".format(spacer_warning))
 
-        if dia_other_mm is None and is_top:
-            lines.append(
-                "  - LD_top = {:.0f} x {:.1f} = ... mm: cannot compute end anchorage -- "
-                "section 2.1's a_t formula needs O_BTM (the bottom main bar's own "
-                "diameter), which is not available because the bottom face is not "
-                "requested (this is a gap in independent-face anchorage, not an "
-                "assumed value).".format(ld_mult, dia_own_mm)
-            )
-            return lines
-
+        # A51: dia_other_mm comes from the SELECTED opposite bar type,
+        # placed or not -- so this only refuses when NOTHING is selected
+        # there, which is the half of A51 that A42 governs. The old wording
+        # here said "because the bottom face is not requested", which was
+        # the pre-A51 rule and is no longer what the code does.
         ld_mm = development_length(dia_own_mm, ld_mult)
         try:
-            a_start_mm, b_start_mm, w_start = self._end_anchorage_result(
-                geometry["is_supported_start"], geometry["support_width_start_mm"],
-                geometry["support_cover_start_mm"], dia_own_mm, dia_other_mm, ld_mm, is_top,
-                geometry["cover_end_start_mm"], "{} face, start end".format(face_label),
+            start_plan = core_plan.end_plan(
+                geometry["is_supported_start"], is_top,
+                geometry["support_width_start_mm"], geometry["support_cover_start_mm"],
+                dia_own_mm, dia_other_mm, ld_mm, geometry["cover_end_start_mm"],
+                "{} face, start end".format(face_label),
             )
-            a_end_mm, b_end_mm, w_end = self._end_anchorage_result(
-                geometry["is_supported_end"], geometry["support_width_end_mm"],
-                geometry["support_cover_end_mm"], dia_own_mm, dia_other_mm, ld_mm, is_top,
-                geometry["cover_end_end_mm"], "{} face, end end".format(face_label),
+            end_plan_ = core_plan.end_plan(
+                geometry["is_supported_end"], is_top,
+                geometry["support_width_end_mm"], geometry["support_cover_end_mm"],
+                dia_own_mm, dia_other_mm, ld_mm, geometry["cover_end_end_mm"],
+                "{} face, end end".format(face_label),
             )
         except ValueError as ex:
             lines.append("  - Cannot compute end anchorage: {}".format(ex))
             return lines
+
+        refusals = [
+            p.refused_reason for p in (start_plan, end_plan_) if p.refused_reason
+        ]
+        if refusals:
+            for reason in refusals:
+                lines.append("  - **REFUSED (A51):** {}".format(reason))
+            return lines
+
         lines.append(
             "  - LD = {:.0f} x {:.1f} = {:.1f} mm -> start: {}; end: {}".format(
                 ld_mult, dia_own_mm, ld_mm,
-                self._format_end_result(a_start_mm, b_start_mm),
-                self._format_end_result(a_end_mm, b_end_mm),
+                self._format_end_result(start_plan.a_mm, start_plan.b_mm),
+                self._format_end_result(end_plan_.a_mm, end_plan_.b_mm),
             )
         )
-        for w in (w_start, w_end):
+        for w in (start_plan.warning, end_plan_.warning):
             if w:
                 lines.append("  - **WARNING:** {}".format(w))
         if not geometry["is_supported_start"]:
@@ -1515,32 +1530,364 @@ class DetailBeamWindow(forms.WPFWindow):
         self.geometry_panel.IsEnabled = True
 
     # ------------------------------------------------------------- place
-    def _do_place(self):
-        """THE PLACEMENT CALL SITE IS A LOUD STUB, NOT A SILENT NO-OP.
+    def _build_placement_plans(self, review, geometry):
+        """Every number that is about to become steel, computed ONCE.
 
-        Main bars, stirrups and crack bars are placed by #47 (Beam &
-        Materials -- bar-type/hook selection), #48 (the three
-        reinforcement tabs' own inputs) and #50 (Review's derivation rule
-        and report), none of which exist yet. Raising here -- inside the
-        one Transaction ``run_in_transaction`` already wraps -- is
-        deliberate: it proves the rollback path works on a real exception
-        before there is anything real to roll back, and it refuses to let
-        the engineer believe Place did something it did not.
+        The Review report formats these same plan objects (#50/#56), so
+        the report cannot describe one beam while the model receives
+        another. Returns (top_face, bottom_face, stirrups, crack), any of
+        which is None when that section was not requested.
         """
-        raise NotImplementedError(
-            "Place is not implemented yet, and nothing has been placed.\n\n"
-            "USE THE EXISTING BUTTONS MEANWHILE: \"Place Main Bars\", "
-            "\"Place Stirrups\" and \"Place Crack Bars\" are still on the "
-            "ribbon and still work -- they are the verified tool (v0.1.0). "
-            "They stay until this window has replaced them in practice "
-            "(#55).\n\n"
-            "This window's placement is built by #56, which ports the "
-            "three verified buttons' placement paths into this one "
-            "transaction. Its inputs come from #48 (Main bars/Stirrups/"
-            "Crack bars tabs) and #50 (Review tab's derivation and "
-            "report). This ticket (#46) built only the window, the tabs, "
-            "the beam-pick flow and the transaction boundary."
+        b_mm, h_mm = geometry["b_mm"], geometry["h_mm"]
+        cover_side_mm = geometry["cover_side_mm"]
+        stirrup_dia_mm = bar_type_diameter_mm(
+            self.selection.stirrup_bar_type, internal_to_mm
         )
+        spacer_dia_mm = ui_inputs.parse_positive_float(
+            self.spacer_dia_tb.Text, "O_spacer"
+        )
+        top_dia_mm = (
+            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
+            if self.selection.top_main_bar_type is not None else None
+        )
+        btm_dia_mm = (
+            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
+            if self.selection.bottom_main_bar_type is not None else None
+        )
+
+        def _face(is_top):
+            # A51: the OPPOSITE face's diameter comes from its SELECTED
+            # bar type whether or not that face is being placed. Passing
+            # None here is what makes core_plan refuse the end by name
+            # rather than invent a diameter (A42).
+            dia_own = top_dia_mm if is_top else btm_dia_mm
+            dia_other = btm_dia_mm if is_top else top_dia_mm
+            count_tb = self.top_bar_count_tb if is_top else self.bottom_bar_count_tb
+            layers_tb = self.top_layers_tb if is_top else self.bottom_layers_tb
+            label = "Top" if is_top else "Bottom"
+            return core_plan.face_plan(
+                is_top, h_mm, b_mm,
+                geometry["cover_top_mm"] if is_top else geometry["cover_btm_mm"],
+                cover_side_mm,
+                geometry["cover_end_start_mm"],
+                stirrup_dia_mm, dia_own, dia_other, spacer_dia_mm,
+                ui_inputs.parse_optional_positive_int(
+                    count_tb.Text, "{} bar count".format(label)
+                ),
+                ui_inputs.parse_optional_positive_int(
+                    layers_tb.Text, "{} layer count".format(label),
+                    max_value=MAX_LAYERS,
+                ),
+                ui_inputs.parse_positive_float(
+                    (self.ld_top_mult_tb if is_top else self.ld_btm_mult_tb).Text,
+                    "LD_{} multiplier".format("top" if is_top else "btm"),
+                ),
+                geometry["is_supported_start"], geometry["support_width_start_mm"],
+                geometry["support_cover_start_mm"],
+                geometry["is_supported_end"], geometry["support_width_end_mm"],
+                geometry["support_cover_end_mm"],
+            )
+
+        top_face = _face(True) if review.top_main.requested else None
+        bottom_face = _face(False) if review.bottom_main.requested else None
+
+        stirrups = None
+        if review.stirrups.requested:
+            if geometry["l_mm"] is None:
+                raise ValueError(
+                    "Stirrups cannot be placed: rev 2 section 3.1's three "
+                    "zones need a support-centre-to-support-centre span, "
+                    "which needs BOTH ends supported. This beam has an "
+                    "unsupported end."
+                )
+            stirrups = core_plan.stirrup_plan(
+                geometry["l_mm"], b_mm, h_mm,
+                geometry["cover_top_mm"], stirrup_dia_mm,
+                ui_inputs.closure_type_from_label(
+                    self.closure_type_combo.SelectedItem
+                ),
+                ui_inputs.parse_positive_float(
+                    self.dense_spacing_tb.Text, "Dense spacing"
+                ),
+                ui_inputs.parse_positive_float(
+                    self.normal_spacing_tb.Text, "Normal spacing"
+                ),
+                geometry["support_width_start_mm"] / 2.0,
+                geometry["support_width_end_mm"] / 2.0,
+            )
+
+        crack = None
+        if review.crack.requested:
+            # A26/A50: measured to the INNERMOST layer of each face, which
+            # is the LAST plan layer, never the first. Both faces exist
+            # here by construction -- A50 is what makes that true.
+            crack = core_plan.crack_plan(
+                h_mm, b_mm, cover_side_mm, stirrup_dia_mm,
+                bar_type_diameter_mm(self.selection.crack_bar_type, internal_to_mm),
+                _face(True).layers[-1].offset_mm,
+                _face(False).layers[-1].offset_mm,
+                ui_inputs.parse_positive_float(self.crack_s_max_tb.Text, "s_max"),
+            )
+
+        return top_face, bottom_face, stirrups, crack
+
+    def _do_place(self):
+        """Places every REQUESTED section, inside the one transaction that
+        ``run_in_transaction`` has already opened (A46).
+
+        All-or-nothing by construction: this raises rather than returning
+        partial results, and the transaction rolls back, so a beam is
+        never left half detailed. That includes A51's refusal -- a face
+        whose anchorage cannot be computed stops the whole placement
+        rather than being quietly skipped.
+
+        Ported from the three pushbuttons that placed real reinforcement
+        in a live session (v0.1.0). What changed is WHERE the numbers come
+        from -- one plan, shared with the report -- not how any of them is
+        computed.
+        """
+        review = self._compute_review_derivation()
+        if not review.any_requested:
+            raise ValueError(
+                "Nothing is requested, so nothing was placed. Select a bar "
+                "type and enter a bar count for a face, or select the "
+                "stirrup hook, on the Beam & Materials and Main bars/"
+                "Stirrups tabs."
+            )
+
+        geometry = self._gather_report_geometry(
+            self.geometry_mm[1], self.geometry_mm[2]
+        )
+        if "error" in geometry:
+            raise ValueError(geometry["error"])
+
+        top_face, bottom_face, stirrups, crack = self._build_placement_plans(
+            review, geometry
+        )
+
+        placed = []
+        # Bottom before top, stirrups before crack bars: the order the
+        # three verified buttons ran in when the engineer used them one
+        # after another. Order does not affect geometry -- every bar's
+        # position comes from the plan -- but keeping it makes the #55 A/B
+        # comparison read the same way in the model tree.
+        if bottom_face is not None:
+            placed += self._place_main_face(
+                geometry, bottom_face, self.selection.bottom_main_bar_type, False
+            )
+        if top_face is not None:
+            placed += self._place_main_face(
+                geometry, top_face, self.selection.top_main_bar_type, True
+            )
+        if stirrups is not None:
+            placed += self._place_stirrups(geometry, stirrups)
+        if crack is not None:
+            placed += self._place_crack_bars(geometry, crack)
+
+        return placed
+
+    # ------------------------------------------------------- placement (#56)
+    def _placement_reference_points(self, geometry):
+        """Where each end's bars START: the support FACE when that end is
+        supported, the beam's own physical end when it is not (section
+        2.5). Ported from the verified pushbuttons, which both derive it
+        this way.
+        """
+        if geometry["is_supported_start"]:
+            ref_start = start_support_face_point(
+                geometry["support_start"], geometry["start_pt"], geometry["axis"],
+                mm_to_internal(geometry["support_width_start_mm"]),
+            )
+        else:
+            ref_start = geometry["start_pt"]
+        if geometry["is_supported_end"]:
+            ref_end = end_support_face_point(
+                geometry["support_end"], geometry["start_pt"], geometry["axis"],
+                mm_to_internal(geometry["support_width_end_mm"]),
+            )
+        else:
+            ref_end = geometry["end_pt"]
+        return ref_start, ref_end
+
+    def _place_main_face(self, geometry, face, bar_type, is_top):
+        """One face's main bars, from a ``core_plan.FacePlan``.
+
+        The plan holds every dimension; this method only turns numbers
+        into points and calls the same helpers the verified "Place Main
+        Bars" calls. Nothing is computed here -- if a number is missing it
+        is added to the plan, never derived at this call site (A48's rule,
+        applied to the placer rather than the renderer).
+        """
+        for end in (face.start_end, face.end_end):
+            if end.refused_reason:
+                # Refusing INSIDE the transaction is deliberate: it rolls
+                # back whatever earlier sections placed, so the beam is
+                # never left half detailed (A46).
+                raise ValueError(end.refused_reason)
+
+        axis = geometry["axis"]
+        u_dir, v_dir = beam_section_axes(self.beam)
+        bend_direction = v_dir.Negate() if is_top else v_dir
+        du_internal, dv_internal = beam_section_centre_offsets(
+            self.beam, geometry["start_pt"]
+        )
+        ref_start, ref_end = self._placement_reference_points(geometry)
+
+        cover_end_start_mm = geometry["cover_end_start_mm"]
+        cover_end_end_mm = geometry["cover_end_end_mm"]
+        # mm_to_internal(None) raises inside UnitUtils -- converted only
+        # where it is actually consumed, which is the unsupported branch.
+        a_start_internal = (
+            mm_to_internal(face.start_end.a_mm) if geometry["is_supported_start"]
+            else mm_to_internal(cover_end_start_mm)
+        )
+        a_end_internal = (
+            mm_to_internal(face.end_end.a_mm) if geometry["is_supported_end"]
+            else mm_to_internal(cover_end_end_mm)
+        )
+        b_start_internal = (
+            mm_to_internal(face.start_end.b_mm)
+            if face.start_end.b_mm is not None else None
+        )
+        b_end_internal = (
+            mm_to_internal(face.end_end.b_mm)
+            if face.end_end.b_mm is not None else None
+        )
+
+        placed = []
+        for layer in face.layers:
+            for u_mm in layer.u_positions_mm:
+                bar_ref_start = bar_point_at_uv(
+                    ref_start, u_dir, v_dir, du_internal, dv_internal,
+                    u_mm, layer.v_mm, mm_to_internal,
+                )
+                bar_ref_end = bar_point_at_uv(
+                    ref_end, u_dir, v_dir, du_internal, dv_internal,
+                    u_mm, layer.v_mm, mm_to_internal,
+                )
+                corner_start, bend_start = main_bar_end_geometry(
+                    geometry["is_supported_start"], bar_ref_start, axis, True,
+                    a_start_internal, b_start_internal,
+                )
+                corner_end, bend_end = main_bar_end_geometry(
+                    geometry["is_supported_end"], bar_ref_end, axis, False,
+                    a_end_internal, b_end_internal,
+                )
+                curves = build_main_bar_curves(
+                    corner_start, corner_end, bend_direction, bend_start, bend_end
+                )
+                placed.append(place_anchored_bar(
+                    doc, self.beam, bar_type, curves,
+                    bend_plane_normal(axis, bend_direction),
+                ))
+        return placed
+
+    def _place_stirrups(self, geometry, stirrups):
+        """The three zones, from a ``core_plan.StirrupPlan``.
+
+        Carries forward the finding that cost issue #18 a review round:
+        the core returns corners about the section CENTROID, but a station
+        point sits on the beam's LOCATION CURVE. With Revit's default
+        top-justified structural framing those differ by h/2, and skipping
+        the offset builds the entire cage outside the beam. It is applied
+        per station, exactly as the verified button applies it.
+        """
+        u_dir, v_dir = beam_section_axes(self.beam)
+        norm = bend_plane_normal(u_dir, v_dir)
+        du_internal, dv_internal = beam_section_centre_offsets(
+            self.beam, geometry["start_pt"]
+        )
+        placed = []
+        for zone in stirrups.zones:
+            station_internal = point_at_cc_offset(
+                geometry["start_pt"], geometry["axis"], geometry["support_start"],
+                zone.zone.start, mm_to_internal,
+            )
+            origin_internal = (
+                station_internal
+                + u_dir.Multiply(du_internal)
+                + v_dir.Multiply(dv_internal)
+            )
+            curves = build_stirrup_curves(
+                origin_internal, u_dir, v_dir, stirrups.endpoints_mm, mm_to_internal
+            )
+            rebar = place_stirrup(
+                doc, self.beam, self.selection.stirrup_bar_type,
+                self.selection.stirrup_hook_type, curves, norm,
+            )
+            apply_maximum_spacing_layout(
+                rebar,
+                mm_to_internal(zone.max_spacing_mm),
+                mm_to_internal(zone.array_length_mm),
+                zone.include_first,
+                zone.include_last,
+            )
+            placed.append(rebar)
+        return placed
+
+    def _place_crack_bars(self, geometry, crack):
+        """Crack/skin bars, from a ``core_plan.CrackPlan``.
+
+        A23: no hook at either end, so ``b`` is always None and
+        ``build_main_bar_curves`` emits a single straight segment. A
+        supported end embeds; an unsupported one stops at beam-end minus
+        cover.
+        """
+        axis = geometry["axis"]
+        u_dir, v_dir = beam_section_axes(self.beam)
+        du_internal, dv_internal = beam_section_centre_offsets(
+            self.beam, geometry["start_pt"]
+        )
+        ref_start, ref_end = self._placement_reference_points(geometry)
+        norm = bend_plane_normal(axis, v_dir)
+
+        result_start = crack_bar_end_result(
+            geometry["is_supported_start"],
+            support_width_mm=geometry["support_width_start_mm"],
+            support_cover_mm=geometry["support_cover_start_mm"],
+            beam_end_cover_mm=geometry["cover_end_start_mm"],
+        )
+        result_end = crack_bar_end_result(
+            geometry["is_supported_end"],
+            support_width_mm=geometry["support_width_end_mm"],
+            support_cover_mm=geometry["support_cover_end_mm"],
+            beam_end_cover_mm=geometry["cover_end_end_mm"],
+        )
+        a_start_internal = mm_to_internal(
+            result_start.embedment_mm if geometry["is_supported_start"]
+            else geometry["cover_end_start_mm"]
+        )
+        a_end_internal = mm_to_internal(
+            result_end.embedment_mm if geometry["is_supported_end"]
+            else geometry["cover_end_end_mm"]
+        )
+
+        placed = []
+        for v_mm in crack.v_positions_mm:
+            for u_mm in crack.u_positions_mm:
+                bar_ref_start = bar_point_at_uv(
+                    ref_start, u_dir, v_dir, du_internal, dv_internal,
+                    u_mm, v_mm, mm_to_internal,
+                )
+                bar_ref_end = bar_point_at_uv(
+                    ref_end, u_dir, v_dir, du_internal, dv_internal,
+                    u_mm, v_mm, mm_to_internal,
+                )
+                corner_start, bend_start = main_bar_end_geometry(
+                    geometry["is_supported_start"], bar_ref_start, axis, True,
+                    a_start_internal, None,
+                )
+                corner_end, bend_end = main_bar_end_geometry(
+                    geometry["is_supported_end"], bar_ref_end, axis, False,
+                    a_end_internal, None,
+                )
+                curves = build_main_bar_curves(
+                    corner_start, corner_end, v_dir, bend_start, bend_end
+                )
+                placed.append(place_anchored_bar(
+                    doc, self.beam, self.selection.crack_bar_type, curves, norm
+                ))
+        return placed
 
     def _missing_bar_type_and_hook_messages(self, review):
         """The A42 no-fallback check, scoped to what is actually REQUESTED.
@@ -1615,14 +1962,7 @@ class DetailBeamWindow(forms.WPFWindow):
 
     def _place_in_context(self):
         try:
-            run_in_transaction(doc, "RFT Detail Beam", self._do_place)
-        except NotImplementedError as ex:
-            # The expected path today: the stub refused, the transaction
-            # rolled back, nothing was placed.
-            message = str(ex)
-            self.place_result_tb.Text = message
-            forms.alert(message, title="Not implemented yet")
-            return
+            placed = run_in_transaction(doc, "RFT Detail Beam", self._do_place)
         except Exception as ex:
             # A GENUINE failure, distinguished from the stub deliberately.
             # Titling every exception "Not implemented" would, the moment
@@ -1638,10 +1978,17 @@ class DetailBeamWindow(forms.WPFWindow):
             self.place_result_tb.Text = message
             forms.alert(message, title="Placement failed -- rolled back")
             return
-        # Unreachable until #47/#48/#50 land -- self._do_place always
-        # raises today, so this line has never executed and must not
-        # claim success it cannot back up.
-        self.place_result_tb.Text = "Placed successfully."
+        # #56: reachable for the first time. It reports the COUNT rather
+        # than the word "successfully" alone -- a number the engineer can
+        # check against the Review report's own totals, and against what
+        # the three verified buttons produce for the same beam, which is
+        # the A/B comparison #55 turns on.
+        count = len(placed) if placed is not None else 0
+        message = "Placed {} rebar element{}.".format(
+            count, "" if count == 1 else "s"
+        )
+        self.place_result_tb.Text = message
+        self.status_tb.Text = message
 
 
 # The window must outlive main(). A modeless window whose only reference is

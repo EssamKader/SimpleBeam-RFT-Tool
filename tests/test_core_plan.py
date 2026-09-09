@@ -1,0 +1,269 @@
+# -*- coding: utf-8 -*-
+"""#56 -- the shared placement plan.
+
+These tests are the ones that matter most in the project: this module's
+output becomes steel. Everything here is checked against the 300x900
+verification beam the tool was proven on, and against the independently
+authored notation drawing (docs/ui/sketch-notation.svg), so a wrong number
+has to survive two unrelated sources agreeing.
+"""
+
+import pytest
+
+from rft.core import plan
+from rft.core.stirrups import centreline_leg_dimensions_mm, outer_leg_dimensions_mm
+
+# The live-verified beam: 300 x 900, 25 mm cover, O10 stirrup, O16 mains.
+B_MM, H_MM, COVER_MM = 300.0, 900.0, 25.0
+STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM = 10.0, 16.0, 16.0
+
+
+def _bottom_face(layer_count=2, bar_count=3):
+    return plan.face_plan(
+        False, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM,
+        bar_count, layer_count, 55.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    )
+
+
+# --- layers ----------------------------------------------------------------
+
+
+def test_first_layer_offset_matches_the_notation_drawing():
+    """43 mm on the verification beam: 25 cover + 10 stirrup + 16/2.
+
+    docs/ui/sketch-notation.svg was drawn from the spec by hand and states
+    offset_1 = 43. Two independent derivations agreeing is worth more than
+    either alone.
+    """
+    layers = _bottom_face(layer_count=1).layers
+    assert len(layers) == 1
+    assert layers[0].offset_mm == pytest.approx(43.0)
+
+
+def test_second_layer_is_one_bar_plus_one_spacer_further_in():
+    layers = _bottom_face(layer_count=2).layers
+    assert layers[1].offset_mm - layers[0].offset_mm == pytest.approx(
+        BAR_DIA_MM + SPACER_DIA_MM
+    )
+    assert layers[1].offset_mm == pytest.approx(75.0)
+
+
+def test_bottom_layers_sit_below_the_centroid_and_top_layers_above():
+    """The sign convention, which is the one thing that puts a whole cage
+    outside the concrete if it is inverted."""
+    bottom = _bottom_face(layer_count=2).layers
+    assert all(layer.v_mm < 0 for layer in bottom)
+    assert bottom[0].v_mm == pytest.approx(-H_MM / 2.0 + 43.0)
+
+    top = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 3, 2, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    ).layers
+    assert all(layer.v_mm > 0 for layer in top)
+    assert top[0].v_mm == pytest.approx(H_MM / 2.0 - 43.0)
+
+
+def test_every_bar_lands_inside_the_concrete():
+    for layer in _bottom_face(layer_count=3, bar_count=4).layers:
+        assert -H_MM / 2.0 < layer.v_mm < H_MM / 2.0
+        for u_mm in layer.u_positions_mm:
+            assert -B_MM / 2.0 < u_mm < B_MM / 2.0
+
+
+def test_layer_numbering_starts_at_one_and_is_dense():
+    layers = _bottom_face(layer_count=4).layers
+    assert [layer.layer_n for layer in layers] == [1, 2, 3, 4]
+
+
+# --- anchorage, and A51 ----------------------------------------------------
+
+
+def test_supported_end_gets_a_and_b():
+    face = _bottom_face()
+    assert face.start_end.a_mm is not None
+    assert face.start_end.b_mm is not None
+    assert face.start_end.refused_reason is None
+
+
+def test_unsupported_end_has_no_hook_and_warns():
+    """§2.5/A12/R3: a free end runs straight to beam-end-minus-cover, with
+    no hook, and says so."""
+    face = plan.face_plan(
+        False, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 3, 1, 55.0,
+        True, 400.0, 40.0, False, None, None,
+    )
+    assert face.end_end.b_mm is None
+    assert face.end_end.warning is not None
+    assert face.end_end.refused_reason is None
+
+
+def test_a51_top_anchorage_uses_a_selected_bottom_diameter():
+    """A51: the bottom face need not be PLACED for its selected bar type's
+    diameter to be used -- the selection is an explicit statement of size.
+    """
+    with_bottom = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, 25.0, SPACER_DIA_MM, 3, 1, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    )
+    assert with_bottom.start_end.refused_reason is None
+    assert with_bottom.start_end.a_mm is not None
+
+    # A different bottom diameter must actually change a_t, or the
+    # parameter is being ignored and this rule is decorative.
+    other = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, 12.0, SPACER_DIA_MM, 3, 1, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    )
+    assert other.start_end.a_mm != with_bottom.start_end.a_mm
+
+
+def test_a51_top_anchorage_refuses_when_no_bottom_type_is_selected():
+    """The half of A51 that completes it: with no bottom type at all there
+    is no diameter, and A42 forbids inventing one."""
+    face = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, None, SPACER_DIA_MM, 3, 1, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    )
+    for end in (face.start_end, face.end_end):
+        assert end.refused_reason is not None
+        assert "A51" in end.refused_reason
+        assert end.a_mm is None
+
+
+def test_bottom_anchorage_never_needs_the_top_diameter():
+    """§2.1's asymmetry: only a_t depends on the opposite face."""
+    face = plan.face_plan(
+        False, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, None, SPACER_DIA_MM, 3, 1, 55.0,
+        True, 400.0, 40.0, True, 400.0, 40.0,
+    )
+    assert face.start_end.refused_reason is None
+    assert face.start_end.a_mm is not None
+
+
+def test_an_unsupported_top_end_is_not_refused_by_a51():
+    """An unsupported end has no a_t formula to evaluate, so the missing
+    bottom diameter cannot block it."""
+    face = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+        STIRRUP_DIA_MM, BAR_DIA_MM, None, SPACER_DIA_MM, 3, 1, 60.0,
+        False, None, None, False, None, None,
+    )
+    assert face.start_end.refused_reason is None
+    assert face.start_end.a_mm is not None
+
+
+# --- stirrups --------------------------------------------------------------
+
+
+def test_stirrup_loop_is_the_centreline_not_the_outer_rectangle():
+    """Rebar.CreateFromCurves receives the CENTRELINE loop. Using the
+    outer rectangle would place every stirrup one full diameter oversize,
+    and both functions exist in the core, so the wrong one is one word
+    away.
+    """
+    result = plan.stirrup_plan(
+        6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1, 150.0, 200.0, 200.0, 200.0
+    )
+    centre_w, centre_h = centreline_leg_dimensions_mm(
+        B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM
+    )
+    outer_w, outer_h = outer_leg_dimensions_mm(B_MM, H_MM, COVER_MM)
+    us = [u for pair in result.endpoints_mm for (u, _v) in pair]
+    vs = [v for pair in result.endpoints_mm for (_u, v) in pair]
+    assert max(us) - min(us) == pytest.approx(centre_w)
+    assert max(vs) - min(vs) == pytest.approx(centre_h)
+    assert max(us) - min(us) != pytest.approx(outer_w)
+
+
+def test_three_zones_with_the_layout_flags_the_verified_button_uses():
+    result = plan.stirrup_plan(
+        6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1, 150.0, 200.0, 200.0, 200.0
+    )
+    assert [z.name for z in result.zones] == ["zone1", "zone2", "zone3"]
+    assert [(z.include_first, z.include_last) for z in result.zones] == [
+        (True, True), (False, True), (False, True)
+    ]
+    assert result.total_count == sum(z.count for z in result.zones)
+
+
+def test_dense_zones_are_never_spaced_wider_than_the_normal_zone():
+    result = plan.stirrup_plan(
+        6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1, 150.0, 200.0, 200.0, 200.0
+    )
+    by_name = dict((z.name, z) for z in result.zones)
+    assert by_name["zone1"].spacing_mm <= by_name["zone2"].spacing_mm
+    assert by_name["zone3"].spacing_mm <= by_name["zone2"].spacing_mm
+
+
+def test_achieved_spacing_never_exceeds_the_maximum_asked_for():
+    for dense, normal in ((150.0, 200.0), (100.0, 250.0), (200.0, 200.0)):
+        result = plan.stirrup_plan(
+            6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1,
+            dense, normal, 200.0, 200.0,
+        )
+        for zone in result.zones:
+            assert zone.spacing_mm <= zone.max_spacing_mm + 1e-9
+
+
+def test_parked_closure_type_3_is_refused_here_too():
+    with pytest.raises(ValueError):
+        plan.stirrup_plan(
+            6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 3,
+            150.0, 200.0, 200.0, 200.0,
+        )
+
+
+# --- crack bars ------------------------------------------------------------
+
+
+def test_crack_plan_matches_the_notation_drawing():
+    """Four layers at 162.8 mm on the verification beam -- the same figure
+    docs/ui/sketch-notation.svg carries, derived independently."""
+    result = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, 12.0, 43.0, 43.0, 200.0
+    )
+    assert result.n_layers == 4
+    assert result.spacing_mm == pytest.approx(162.8, abs=0.1)
+    assert len(result.v_positions_mm) == 4
+
+
+def test_crack_layers_count_interior_divisions_not_gaps():
+    """§5.2 divides H_avail into n gaps and puts a layer at each INTERIOR
+    division, so layers = gaps - 1. Reading ``n_gaps`` instead would place
+    an extra layer on top of a main-bar layer -- a one-word error with no
+    visible symptom in a count.
+    """
+    from rft.core.crack_bars import crack_layer_plan
+
+    h_avail = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, 12.0, 43.0, 43.0, 200.0
+    )
+    raw = crack_layer_plan(h_avail.h_avail_mm, 200.0)
+    assert h_avail.n_layers == raw.n_crack_layers
+    assert h_avail.n_layers == raw.n_gaps - 1
+
+
+def test_crack_bars_sit_between_the_innermost_main_layers():
+    result = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, 12.0, 43.0, 43.0, 200.0
+    )
+    top_limit = H_MM / 2.0 - 43.0
+    btm_limit = -H_MM / 2.0 + 43.0
+    for v_mm in result.v_positions_mm:
+        assert btm_limit < v_mm < top_limit
+
+
+def test_crack_bars_are_one_per_side():
+    result = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, 12.0, 43.0, 43.0, 200.0
+    )
+    assert len(result.u_positions_mm) == 2
+    assert result.u_positions_mm[0] == pytest.approx(-result.u_positions_mm[1])
