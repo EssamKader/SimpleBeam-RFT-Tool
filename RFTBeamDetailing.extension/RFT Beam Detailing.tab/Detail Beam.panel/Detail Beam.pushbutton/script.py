@@ -542,11 +542,12 @@ class DetailBeamWindow(forms.WPFWindow):
             "ribbon and still work -- they are the verified tool (v0.1.0). "
             "They stay until this window has replaced them in practice "
             "(#55).\n\n"
-            "This window's placement is built by #47 (Beam & Materials "
-            "tab), #48 (Main bars/Stirrups/Crack bars tabs) and #50 "
-            "(Review tab's derivation and report). This ticket (#46) built "
-            "only the window, the tabs, the beam-pick flow and the "
-            "transaction boundary."
+            "This window's placement is built by #56, which ports the "
+            "three verified buttons' placement paths into this one "
+            "transaction. Its inputs come from #48 (Main bars/Stirrups/"
+            "Crack bars tabs) and #50 (Review tab's derivation and "
+            "report). This ticket (#46) built only the window, the tabs, "
+            "the beam-pick flow and the transaction boundary."
         )
 
     def _missing_bar_type_and_hook_messages(self):

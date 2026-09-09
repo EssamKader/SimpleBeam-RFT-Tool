@@ -454,6 +454,59 @@ human step, not an agent one.
 
 ---
 
+## U12 (#56) — Port the three placement paths into the one transaction
+
+> **As** the engineer, **I want** the single window to place exactly the
+> reinforcement the three verified buttons place, **so that** the rework
+> changed my interface and not my steel.
+
+Added 2026-09-09, closing a gap in this spec's own decomposition rather than
+in the tool. U4 collects inputs; U6 derives what is *requested* and reports
+it. **Neither ports the `Rebar.CreateFromCurves` calls themselves**, and no
+other story did either — the shell's stub message (#46) asserted #47/#48/#50
+would build placement, which the acceptance criteria of those three do not
+support. Rather than let the largest and riskiest piece of work in the set
+arrive as a side effect of a ticket that did not name it, it gets its own
+story.
+
+**Why it is separated deliberately, not merely overlooked twice**
+
+This is the only story in the set that can put wrong steel in a model.
+Everything else changes what the engineer sees or types. It therefore earns
+its own review pass and its own live-host verification, instead of being
+reviewed alongside thirty new input fields where a placement defect competes
+for attention with a mislabelled textbox.
+
+**Acceptance criteria**
+
+- [ ] The main-bar, stirrup and crack-bar placement paths from
+  `Place Main Bars`, `Place Stirrups` and `Place Crack Bars` all run inside
+  the **single** `run_in_transaction` the shell already opens — A46's
+  all-or-nothing, no partially detailed beam.
+- [ ] Placement reads its inputs from the tabs (U4) and its bar types from
+  the one `BeamMaterialsSelection` (U3). **No second collector call, no
+  re-prompting, no free-text diameter** (A42).
+- [ ] Only the sections U6 derives as *requested* are placed, and the
+  transaction is not opened at all when nothing is requested.
+- [ ] **`rft.core` results are unchanged.** This is a port of the CALLING
+  code, not of the detailing arithmetic. A diff that changes what a core
+  function returns is out of scope — stop and ask.
+- [ ] The two live-verified geometry facts are preserved verbatim: the
+  centroid-to-location-curve offset applied at each stirrup station, and
+  `GetSymbolGeometry()` (symbol space) rather than `GetInstanceGeometry()`
+  for the rotation-safe bounding box — the 45° beam is the test that
+  catches getting either wrong.
+- [ ] The A/B check of #55 (U11) is run against this: the same beam
+  detailed by the old buttons and by the window, results compared.
+
+**Depends on:** U2, U3, U4, U6 — U6 in particular, since "place what is
+requested" has no meaning until the derivation rule exists.
+
+**Blocks:** U11 (#55). The old buttons cannot retire before the window can
+place.
+
+---
+
 ## Dependency order
 
 ```
@@ -462,7 +515,8 @@ U1 (severity) ───────┼─> U2 (shell) ─┬─> U3 ─> U4 ─>
                      │               ├─> U5 ─> U7
                      └───────────────┴─> U8 ─> U9
 
-                       U11 (retire the old buttons) <- U2, U3, U4, U6
+                       U12 (port placement) <- U2, U3, U4, U6
+                       U11 (retire the old buttons) <- U12
                        + live-host verification, a human step
 ```
 
