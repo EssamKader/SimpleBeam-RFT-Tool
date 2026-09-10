@@ -1027,7 +1027,7 @@ def test_list_stirrup_hook_types_returns_empty_list_when_none_match(monkeypatch)
 
 
 # --- Issue #27 (A42): per-role RebarBarType resolution and reworked -------
-# --- Place Main Bars' diameter source, verified at the adapter boundary --
+# --- the main-bar diameter source, verified at the adapter boundary ------
 
 
 def test_bar_type_diameter_mm_reads_top_and_bottom_types_independently():

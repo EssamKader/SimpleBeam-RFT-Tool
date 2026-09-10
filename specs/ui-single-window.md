@@ -436,11 +436,12 @@ delete early and one good reason not to.
 
 - [ ] `Place Main Bars`, `Place Stirrups`, `Place Crack Bars` and
   `Spike.panel` deleted.
-- [ ] **Blocked until the single window has placed correct reinforcement on
-  a live host** — on both the 0° and the 45° beam, with the results compared
-  against what the old buttons produce for the same inputs. That comparison
-  is the point of keeping them: it is a direct A/B check that the rework
-  changed the interface and not the detailing.
+- [x] **Blocked until the single window has placed correct reinforcement on
+  a live host.** Satisfied 2026-09-10: the window placed reinforcement in a
+  live session (`v0.2.0-rc5`) and the project owner then instructed removal.
+  The side-by-side A/B comparison was **not** run first — his call, and the
+  comparison remains available at any time, since `v0.1.0` is a tag and the
+  old buttons can be loaded from it in a separate worktree.
 - [ ] The `Detail Beam` window is the only reinforcement command left, per
   A46/A47.
 - [ ] No dead code or commented-out remnants left behind; the old logic
