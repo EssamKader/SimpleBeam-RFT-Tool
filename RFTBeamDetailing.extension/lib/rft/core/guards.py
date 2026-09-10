@@ -20,7 +20,38 @@ from collections import namedtuple
 from .anchorage import free_end_configuration_warning
 from .stirrups import TYPE3_PARKED_MESSAGE
 
-GuardMessage = namedtuple("GuardMessage", ["condition", "spec_section", "message"])
+# Whether a guard STOPS the run or merely deserves the engineer's
+# attention (issue #45, U1).
+#
+# Until now severity was implicit -- it lived in whether the CALL SITE
+# happened to follow the message with ``script.exit()``. That worked for
+# as long as one could read the call sites, and stopped working the moment
+# the three pushbuttons were replaced by one window: the exits went away
+# and nothing carried the distinction, so a refusal and a warning became
+# indistinguishable to any code that received one.
+#
+# These are declared, per construction site, with NO DEFAULT VALUE. A
+# default is exactly wrong here: it would silently label whatever the
+# migration missed, and the whole point is that the label is a statement
+# someone made rather than one that fell out of a field ordering. There
+# are thirteen sites; each says which it is. Omitting it is a TypeError.
+SEVERITY_BLOCKING = "blocking"
+SEVERITY_WARNING = "warning"
+
+GuardMessage = namedtuple(
+    "GuardMessage", ["condition", "spec_section", "message", "severity"])
+
+
+def is_blocking(guard_message):
+    """True when this guard STOPS the run.
+
+    A function rather than a comparison spelled out at every call site, so
+    that the set of blocking severities can grow (an "unverified" tier has
+    already been discussed for A45's unreadable hook angle) without
+    hunting down every ``== SEVERITY_BLOCKING`` in the codebase.
+    """
+    return guard_message.severity == SEVERITY_BLOCKING
+
 
 CONTINUOUS_RUN_SPEC_SECTION = "rev 2 section 9 item 2 (A39)"
 FREE_END_SPEC_SECTION = "rev 2 section 2.5 (A14)"
@@ -149,7 +180,10 @@ def continuous_run_guard_message(end_label, angle_from_collinear_deg):
             CONTINUOUS_RUN_LATERAL_TOLERANCE_MM,
         )
     )
-    return GuardMessage(condition=condition, spec_section=CONTINUOUS_RUN_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=CONTINUOUS_RUN_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def free_end_guard_message(end_label):
@@ -161,7 +195,14 @@ def free_end_guard_message(end_label):
     """
     condition = "{}: no support detected -- cantilever/free end".format(end_label)
     message = "{}: {}".format(end_label, free_end_configuration_warning())
-    return GuardMessage(condition=condition, spec_section=FREE_END_SPEC_SECTION, message=message)
+    # The one WARNING among the thirteen: v0.1.0 put this into its
+    # warnings list and carried on placing (section 2.5/A12's
+    # straight-run, no-hook path is implemented), where every other
+    # guard here was followed by script.exit().
+    return GuardMessage(
+        condition=condition, spec_section=FREE_END_SPEC_SECTION,
+        message=message, severity=SEVERITY_WARNING,
+    )
 
 
 def stirrup_type3_guard_message():
@@ -173,6 +214,7 @@ def stirrup_type3_guard_message():
         condition="stirrup closure type 3 requested -- parked, inner loop undefined",
         spec_section=STIRRUP_TYPE3_SPEC_SECTION,
         message=TYPE3_PARKED_MESSAGE,
+        severity=SEVERITY_BLOCKING,
     )
 
 
@@ -194,4 +236,7 @@ def no_support_detected_message(end_label):
         "be detected here, or this beam must be detailed with that "
         "pushbutton instead.".format(end_label, NO_SUPPORT_SPEC_SECTION)
     )
-    return GuardMessage(condition=condition, spec_section=NO_SUPPORT_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=NO_SUPPORT_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )

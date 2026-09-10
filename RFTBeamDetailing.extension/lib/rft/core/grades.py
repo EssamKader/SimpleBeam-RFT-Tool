@@ -30,7 +30,7 @@ module can verify. The bar diameter itself is no longer typed anywhere; it
 comes from the selected type via ``rft.revit.bar_types.bar_type_diameter_mm``.
 """
 
-from .guards import GuardMessage
+from .guards import GuardMessage, SEVERITY_BLOCKING
 
 GRADE_MILD = "mild St 24/35 (fy 240 MPa, plain round)"
 GRADE_HIGH_TENSILE = "high tensile St 36/52 (fy 360 MPa, deformed)"
@@ -168,7 +168,10 @@ def missing_bar_type_selection_message(role):
         "selection is a blocking validation error; no bar may be placed "
         "with a defaulted or guessed bar type.".format(role_picker_label(role))
     )
-    return GuardMessage(condition=condition, spec_section=BAR_TYPE_SELECTION_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=BAR_TYPE_SELECTION_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def missing_hook_type_selection_message():
@@ -192,7 +195,10 @@ def missing_hook_type_selection_message():
         "incompatible hook (issue #25). A missing selection is a blocking "
         "validation error."
     )
-    return GuardMessage(condition=condition, spec_section=HOOK_ANGLE_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=HOOK_ANGLE_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def no_usable_hook_type_message():
@@ -219,7 +225,10 @@ def no_usable_hook_type_message():
         "Stirrup/Tie-family RebarHookType set to 135 degrees in this "
         "project, then retry (issue #25, A45)."
     )
-    return GuardMessage(condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def hook_style_guard_message(style, hook_type_name=""):
@@ -261,7 +270,10 @@ def hook_style_guard_message(style, hook_type_name=""):
         "Stirrup/Tie-family RebarHookType before placing stirrups "
         "(issue #25, A45).".format(named, style_name, style)
     )
-    return GuardMessage(condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def unreadable_hook_style_message(hook_type_name=""):
@@ -289,7 +301,10 @@ def unreadable_hook_style_message(hook_type_name=""):
         "or confirm this one's family in Revit before retrying "
         "(issue #25, A45).".format(named)
     )
-    return GuardMessage(condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=HOOK_STYLE_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def hook_angle_guard_message(angle_deg, hook_type_name=""):
@@ -317,7 +332,10 @@ def hook_angle_guard_message(angle_deg, hook_type_name=""):
         "135-degree Stirrup/Tie RebarHookType before placing stirrups "
         "(issue #25).".format(named, angle_deg)
     )
-    return GuardMessage(condition=condition, spec_section=HOOK_ANGLE_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=HOOK_ANGLE_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )
 
 
 def stirrup_grade_conflict_message(stirrup_type_id, stirrup_type_name,
@@ -349,4 +367,7 @@ def stirrup_grade_conflict_message(stirrup_type_id, stirrup_type_name,
             stirrup_type_name, other_role, other_type_name, other_role
         )
     )
-    return GuardMessage(condition=condition, spec_section=GRADE_CONFLICT_SPEC_SECTION, message=message)
+    return GuardMessage(
+        condition=condition, spec_section=GRADE_CONFLICT_SPEC_SECTION,
+        message=message, severity=SEVERITY_BLOCKING,
+    )

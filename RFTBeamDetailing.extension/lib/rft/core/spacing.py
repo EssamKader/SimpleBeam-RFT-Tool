@@ -24,7 +24,7 @@ residual question R1, non-blocking) and is untouched here.
 import math
 from collections import namedtuple
 
-from .guards import GuardMessage
+from .guards import GuardMessage, SEVERITY_BLOCKING
 
 SPACING_SPEC_SECTION = "rev 2 section 6.2-6.4 (A21, A27, A28, A29, A43, A44)"
 
@@ -251,7 +251,10 @@ def validate_face_spacing(face_label, option, layer_bar_counts, b_mm, cover_side
             )
         )
         guard_messages.append(
-            GuardMessage(condition=condition, spec_section=SPACING_SPEC_SECTION, message=message)
+            GuardMessage(
+                condition=condition, spec_section=SPACING_SPEC_SECTION,
+                message=message, severity=SEVERITY_BLOCKING,
+            )
         )
         return FaceSpacingReport(
             face_label=face_label, layer_results=[], passes=False, guard_messages=guard_messages
@@ -312,7 +315,10 @@ def validate_face_spacing(face_label, option, layer_bar_counts, b_mm, cover_side
                 )
             )
             guard_messages.append(
-                GuardMessage(condition=condition, spec_section=SPACING_SPEC_SECTION, message=message)
+                GuardMessage(
+                    condition=condition, spec_section=SPACING_SPEC_SECTION,
+                    message=message, severity=SEVERITY_BLOCKING,
+                )
             )
 
     return FaceSpacingReport(
