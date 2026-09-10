@@ -33,6 +33,16 @@ child directories whose names end in `.extension`; naming the bundle
 directly registers a path with no extensions in it, and the tab never
 appears.
 
+**That folder must also contain `RFT.lib`, and since #64 it does** — the
+two are siblings at the repo root, so one registered path covers both and
+the move needed no re-registration. `RFT.lib` is a pyRevit *library
+extension* (any folder whose name ends in `.lib`), and pyRevit adds it to
+the module path of every UI extension. Without it on the same search
+root, `import rft.core` fails and the button dies on its first import.
+If the tab appears but every click raises `ImportError: No module named
+rft`, this is why: check that `RFT.lib` sits beside the `.extension`
+folder in the registered path.
+
 *(An earlier draft of this document gave
 `pyrevit extend "<repo>/SimpleBeamRFT.extension"` after a
 `git checkout <tag>`. That command does not do this job -- verified against

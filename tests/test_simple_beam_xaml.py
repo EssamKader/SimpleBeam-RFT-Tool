@@ -316,7 +316,7 @@ API_CALLS_NEEDING_CONTEXT = ("revit.pick_element", "run_in_transaction")
 
 REPORT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "SimpleBeamRFT.extension", "lib", "rft", "ui", "report.py",
+    "RFT.lib", "rft", "ui", "report.py",
 )
 
 

@@ -62,5 +62,5 @@ jobs:
         # Cheap, and it catches the one class of failure a text-only guard
         # cannot: a syntax error in the file no test can import.
         run: |
-          python -m compileall -q SimpleBeamRFT.extension/lib
+          python -m compileall -q RFT.lib
           python -m py_compile "SimpleBeamRFT.extension/RFT-Tools.tab/Beams.panel/Simple Beam.pushbutton/script.py"

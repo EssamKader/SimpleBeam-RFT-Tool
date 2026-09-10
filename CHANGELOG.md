@@ -50,11 +50,27 @@ why `pyrevit extend` — which this section previously named — is the wrong
 command: it clones a third-party extension from a git repo URL rather than
 registering a local folder.
 
-Layout follows pyRevit convention — `SimpleBeamRFT.extension/` containing
-`RFT-Tools.tab/` → `Beams.panel/` →
-`Simple Beam.pushbutton/script.py`, plus `lib/`, which pyRevit adds to
-`sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
-cleanly. As of `v0.2.0` that is the only panel and the only button: the
+Layout is **two** pyRevit extensions, siblings under the registered
+search root:
+
+```
+RFT.lib/rft/                        <- the LIBRARY extension
+SimpleBeamRFT.extension/
+└── RFT-Tools.tab/ → Beams.panel/ → Simple Beam.pushbutton/script.py
+```
+
+`RFT.lib` is a pyRevit **library extension**: a folder whose name ends in
+`.lib` is added to the module path of **every** UI extension, which is
+what lets a future element tool import `rft.core`, `rft.revit` and
+`rft.ui`. The path added is the `.lib` folder itself, so the package sits
+at `RFT.lib/rft`, and the UI extension must contain no `rft` copy of its
+own — an extension's internal paths take precedence and would shadow the
+shared one. Both properties are guarded by
+`tests/test_library_extension_layout.py`; see
+`docs/reuse-for-new-elements.md`. Moved out of
+`SimpleBeamRFT.extension/lib/` by #64.
+
+As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
 
 ## [v0.3.0] — 2026-09-10

@@ -36,11 +36,11 @@ BUNDLE = ("SimpleBeamRFT.extension/RFT-Tools.tab/"
           "Beams.panel/Simple Beam.pushbutton/bundle.yaml")
 XAML = ("SimpleBeamRFT.extension/RFT-Tools.tab/"
         "Beams.panel/Simple Beam.pushbutton/SimpleBeamWindow.xaml")
-PLAN = "SimpleBeamRFT.extension/lib/rft/core/plan.py"
-REPORT = "SimpleBeamRFT.extension/lib/rft/ui/report.py"
-GUARDS = "SimpleBeamRFT.extension/lib/rft/core/guards.py"
-SPACING = "SimpleBeamRFT.extension/lib/rft/core/spacing.py"
-SKETCH_PALETTE = "SimpleBeamRFT.extension/lib/rft/ui/sketch_palette.py"
+PLAN = "RFT.lib/rft/core/plan.py"
+REPORT = "RFT.lib/rft/ui/report.py"
+GUARDS = "RFT.lib/rft/core/guards.py"
+SPACING = "RFT.lib/rft/core/spacing.py"
+SKETCH_PALETTE = "RFT.lib/rft/ui/sketch_palette.py"
 T = "tests/test_simple_beam_xaml.py::"
 WORKFLOW = ".github/workflows/tests.yml"
 
@@ -256,8 +256,8 @@ CASES = [
     # stayed green -- the only consumer of those paths is a shell command.
     # The mutation is the rename itself, reapplied: put the old extension
     # folder back and require the guard to notice the path is gone.
-    (WORKFLOW, "compileall -q SimpleBeamRFT.extension/lib",
-     "compileall -q RFTBeamDetailing.extension/lib",
+    (WORKFLOW, "compileall -q RFT.lib",
+     "compileall -q SimpleBeamRFT.extension/lib",
      "tests/test_ironpython_compat.py::test_every_path_the_ci_workflow_names_exists",
      "a CI path left behind by a rename"),
 ]

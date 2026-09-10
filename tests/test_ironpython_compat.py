@@ -24,25 +24,57 @@ import os
 import re
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXT_ROOT = os.path.join(REPO_ROOT, "SimpleBeamRFT.extension")
+
+# BOTH roots, and the reason is the whole point of this pair of names.
+#
+# IronPython loads the pushbutton from the UI extension and the `rft`
+# package from the LIBRARY extension. #64 moved the package out of
+# `SimpleBeamRFT.extension/lib/` into `RFT.lib/` so a second element can
+# import it -- and a walk of the UI extension alone would then have
+# covered five files instead of thirty-one, silently, while staying green.
+# Every check in this module is only as wide as this list.
+UI_EXT_ROOT = os.path.join(REPO_ROOT, "SimpleBeamRFT.extension")
+LIB_EXT_ROOT = os.path.join(REPO_ROOT, "RFT.lib")
+LOADED_ROOTS = (UI_EXT_ROOT, LIB_EXT_ROOT)
 
 # PEP 263: the cookie must appear on line 1 or line 2 to be honoured.
 CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)")
 
 
-def _extension_py_files():
-    """Every .py file pyRevit's IronPython engine can load from the bundle."""
+def _py_files_under(root):
     found = []
-    for root, dirs, files in os.walk(EXT_ROOT):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
-        for name in sorted(files):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for name in sorted(filenames):
             if name.endswith(".py"):
-                found.append(os.path.join(root, name))
+                found.append(os.path.join(dirpath, name))
+    return found
+
+
+def _extension_py_files():
+    """Every .py file pyRevit's IronPython engine can load, from both
+    extensions: the pushbutton bundle and the shared library."""
+    found = []
+    for root in LOADED_ROOTS:
+        found.extend(_py_files_under(root))
     return found
 
 
 def test_bundle_contains_python_files():
-    """Guard the guard: an empty walk would make every test below vacuous."""
+    """Guard the guard: an empty walk would make every test below vacuous.
+
+    Checked PER ROOT, not just in total. After #64 the library holds all
+    but a handful of the modules, so a total-only count would still pass
+    with the pushbutton bundle contributing nothing -- which is precisely
+    the failure a rename or a move introduces.
+    """
+    for root in LOADED_ROOTS:
+        files = _py_files_under(root)
+        assert files, (
+            "no .py file found under %s, so every check in this module "
+            "silently stops covering it"
+            % os.path.relpath(root, REPO_ROOT).replace("\\", "/"))
+
     files = _extension_py_files()
     assert len(files) >= 15, "expected the extension's modules, found %d" % len(
         files

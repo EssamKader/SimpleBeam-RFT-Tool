@@ -1,27 +1,27 @@
 # Starting a new element (columns, walls, slabs, footings)
 
 Written for a future session that begins "detail the reinforcement of a
-column." Read this before writing any code, because the single most
-important decision — where the shared library lives — has to be made
-BEFORE the second element exists, not after.
+column." Read it before writing any code.
 
-Nothing in this document is scheduled work. It records what is reusable,
-what is not, and what has to be decided first.
+**Section 1 is done** — #64 extracted `RFT.lib`, so the shared library is
+importable from any extension. **Section 2 is not**: where that library is
+*versioned* is still an open question, and it has to be answered before a
+second element exists, not after. Sections 3 to 5 record what is reusable,
+what is not, and in what order to proceed.
 
 ---
 
-## 1. The blocker, and the mechanism that solves it
+## 1. The mechanism — DONE, in #64
+
+**This section describes work that has already happened.** It is kept
+because the reasoning is what a new element needs, not just the result.
 
 `rft.core`, `rft.revit` and `rft.ui` are element-agnostic in large part
-(section 3 below). But today they live at:
-
-```
-SimpleBeamRFT.extension/lib/rft/...
-```
-
-pyRevit puts a UI extension's own `lib/` folder on **that extension's**
-module path only. So a second extension — `ColumnRFT.extension` — could
-not `import rft.core.spacing`. The shared code is real but unreachable.
+(section 3 below). Until #64 they lived at
+`SimpleBeamRFT.extension/lib/rft/`, and pyRevit puts a UI extension's own
+`lib/` folder on **that extension's** module path only — so a second
+extension, `ColumnRFT.extension`, could not have imported them. The
+shared code was real but unreachable.
 
 pyRevit has a first-class mechanism for exactly this: a **library
 extension**, a folder whose name ends in `.lib`.
@@ -54,16 +54,29 @@ inside it.** So the package must sit directly at `RFT.lib/rft/`:
 └── ColumnRFT.extension/         <- thin: button + window + script
 ```
 
-Caveats, stated because they are the ones that bite:
+Caveats, stated because they are the ones that bite — all three are now
+guarded by `tests/test_library_extension_layout.py`, because every one of
+them fails SILENTLY: the beam tool keeps working on this machine while a
+second element imports nothing.
 
-- Verified by **reading pyRevit's source, not by running it.** Confirm on
-  a live host before committing to the layout.
 - An extension's own internal `lib/` paths are added FIRST and therefore
-  **take precedence** over `.lib` paths (the source says so explicitly).
-  A leftover `SimpleBeamRFT.extension/lib/rft/` would silently shadow the
-  shared one. Delete it in the same commit that creates `RFT.lib`.
+  **take precedence** over `.lib` paths (pyRevit's source says so
+  explicitly). A leftover `SimpleBeamRFT.extension/lib/rft/` would shadow
+  the shared one, and the shadowing copy is the one that drifts. #64
+  deleted it in the same commit; the guard checks for an `rft` package
+  ANYWHERE under the UI extension, not just under `lib/`.
+- The `.lib` suffix is load-bearing: `LibraryExtension.matches` is a
+  suffix test on the folder name, so `RFT-lib` is an ordinary folder that
+  nothing is told about.
 - Both folders must be under a **registered search root**, which is the
-  folder that CONTAINS them — the same root already registered today.
+  folder that CONTAINS them. They are siblings at the repo root, which is
+  already the registered root — which is why #64 needed no
+  re-registration, only a pyRevit reload.
+
+Still true, and the reason `v0.3.1-rc1` exists: this was verified by
+**reading pyRevit's source and by a green test suite, not by loading it
+into Revit.** A refactor that changes how modules are FOUND cannot be
+proven by tests that put the package on `sys.path` themselves.
 
 ## 2. The decision that has to come first
 
@@ -89,6 +102,7 @@ element, the button names the case** — a column tool is
 ## 3. What is actually reusable
 
 Judged by whether the public signature contains anything beam-shaped.
+Paths are relative to `RFT.lib/rft/`.
 
 ### Reusable as-is — no beam knowledge at all
 
@@ -172,11 +186,14 @@ The code is the smaller half of what this project produced.
 
 ## 5. Order of work for a new element
 
-1. Decide section 2 (where the library lives). Nothing else can start.
-2. Extract `RFT.lib` from the beam extension, delete the old `lib/`,
-   confirm the beam tool still loads on a live host, tag that. **A
-   refactor with no user-visible change deserves its own tag** so a
-   regression is bisectable.
+1. ~~Extract `RFT.lib`~~ — **done in #64**, shipped as `v0.3.1-rc1`.
+   `import rft.core` now works from any extension under the same search
+   root.
+2. Answer section 2 (where the library is VERSIONED). Still open, and
+   still the project owner's call. #64 left the library in this repo,
+   which is the monorepo option by default rather than by decision — a
+   second element is the point at which that has to be settled, because
+   it is the point at which a tag stops covering everything it loads.
 3. Copy the prover and the CI workflow into the new element's tests
    before writing element code.
 4. Write the new element's spec and open its own amendment ledger.

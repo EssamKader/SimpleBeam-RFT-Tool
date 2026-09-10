@@ -1,10 +1,12 @@
 import os
 import sys
 
+# pyRevit puts a LIBRARY extension's own directory on the module path of
+# every UI extension, so `RFT.lib` (not a `lib/` inside it) is what the
+# `rft` package sits in -- see docs/reuse-for-new-elements.md.
 _LIB = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "SimpleBeamRFT.extension",
-    "lib",
+    "RFT.lib",
 )
 if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
