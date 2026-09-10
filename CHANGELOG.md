@@ -6,7 +6,12 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.2.1` is the current release, and it is verified. Load this one.**
+**`v0.3.0-rc1` is a CANDIDATE, not a release.** It adds the live sketch,
+which is ~470 lines of WPF that nothing outside Revit can execute. Load it
+to test it; the seven checks are in its own entry below.
+
+**`v0.2.1` is the last VERIFIED release.** Go back to it if the candidate
+misbehaves.
 The single `Detail Beam` window opens, picks a beam, reports its plan and
 places main bars, stirrups and crack bars in a live Revit 2024 session --
 confirmed by the project owner on `v0.2.0` and again on `v0.2.1` after the
@@ -51,6 +56,108 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.0-rc1] — 2026-09-10
+
+A candidate, deliberately. The live sketch is the first substantial WPF
+this project has written since the window itself, and the entire
+construction path is unverifiable without a Revit host -- which is the
+exact class of assumption that took `v0.2.0` eight candidates to settle.
+
+### The live sketch (#49, U5)
+
+The three static teaching diagrams #51 added are replaced by drawings of
+YOUR beam, redrawn as you type: cross-section on Main bars and Crack
+bars, longitudinal elevation on Stirrups, following the active tab (A47).
+
+Split the way the report was, and for the same reason: all the geometry
+lives in `lib/rft/ui/sketch.py`, which imports only `collections` and
+`rft.core.stirrups` -- no `pyrevit`, no WPF -- and returns plain shape
+namedtuples in millimetres. `script.py` holds one renderer that applies
+`translate(cx, cy) scale(s, -s)` and maps style keys to palette brushes,
+and nothing else. So the drawing is testable, and 26 tests check it.
+
+**Achieved spacing and the A7 clearance are drawn and coloured by
+compliance** -- green when a layer passes, red when it does not. This is
+the point of the story rather than decoration: the sketch is a
+verification surface. It is also what answers the question asked on first
+sight of the Stirrups tab -- "how would a user know the difference between
+hook 1, 2, 3, 4 if he cannot see it" -- since the section now shows the
+selected closure type and where its hooks land.
+
+Two elements are drawn as schematic and say so on the drawing: individual
+stirrup stations (the bands and `n @ s` are exact, the stations are
+Revit's own rebar-set layout) and hook bend arcs (angle and leg length
+exact, the fillet belongs to the bar type's bend radius).
+
+Verified by execution, independently of the implementer's own tests: the
+drawn bar positions EQUAL `rft.core.plan`'s values on the 300x900 beam
+(v = +/-407.0 and +/-375.0, u = -107.0/0.0/107.0, radius = dia/2, twelve
+bars, v increasing upward), a failing spacing really does colour red where
+a passing one colours green, and a REFUSED end (A51) draws the plan's own
+refusal text rather than crashing on a `None`.
+
+### Guards can say whether they block (#45)
+
+`GuardMessage` gained `severity`, declared at all thirteen construction
+sites with no default -- omitting it is a `TypeError`. The values were
+read back out of the `v0.1.0` tag rather than inferred from the message
+wording, because #55 deleted the pushbuttons that held the behaviour:
+every guard there was `forms.alert()` then `script.exit()` except the
+free-end one, which warned and carried on placing. Twelve blocking, one
+warning. Nothing reads `severity` yet, so no behaviour changed.
+
+### Two duplicated shapes collapsed
+
+Both found by review, both agreeing with their originals at the time,
+both the same pattern as the `ZONE_LAYOUT_FLAGS` copy that had the report
+and the placer describing different stirrup sets for three releases:
+
+- The support-detection dict had grown a second writer in the pick
+  handler, spelling out all twelve keys again.
+- `rft.core.plan` no longer restates `ZONE_LAYOUT_FLAGS` (fixed in
+  `v0.2.1`, noted here because the new guard belongs to the same family).
+
+A duplicate that agrees is still a duplicate. Both are guarded now.
+
+### Numbers
+
+Tests: 415 -> 442. Guards proven by mutation: 20 -> 24.
+
+### NOT VERIFIED
+
+Every WPF call: `FindResource`, `Canvas.SetLeft`/`SetTop`,
+`PointCollection`, and constructing `Line`/`Ellipse`/`Polygon`/`TextBlock`
+from IronPython inside a modeless `WPFWindow`. Flagged `SHAPE UNVERIFIED`
+in the source per CONTEXT.md. Three defects have reached a live host in
+this project because a fake modelled something the real API does not
+provide.
+
+### What to check on the live run
+
+1. Pick the 300x900 beam -- Main bars and Crack bars each show a to-scale
+   cross-section immediately.
+2. Switch to Stirrups -- the longitudinal elevation, not the section.
+3. Enter a bar count that fails spacing (9 bars in a 300 mm web) -- the
+   spacing dimension renders RED; a passing count renders GREEN.
+4. Pick a beam with one unsupported end -- a caption with the refusal or
+   warning text, no crash, no bar segment on that face.
+5. Resize the window -- the sketches rescale without clipping.
+6. The stirrup ticks read as schematic; the `n @ s` zone labels read as
+   exact.
+7. The window OPENS, with no `AttributeError` and no "Cannot find
+   resource". This is the one thing the text guards cannot replace, and
+   it is what broke rc6 of the last release.
+
+### Known, and not fixed here
+
+Place still does not refuse on a section 6.2-6.4 spacing violation
+(issue #61). The Review report prints "REFUSED" and the bars are placed
+anyway -- a regression against `v0.1.0`, found while establishing #45's
+severities. It affects steel rather than pixels and is the most
+consequential thing still open.
+
+---
 
 ## [v0.2.1] — 2026-09-10
 
