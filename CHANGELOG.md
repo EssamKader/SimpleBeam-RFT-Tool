@@ -6,9 +6,10 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.3.0-rc3` is a CANDIDATE, not a release.** rc1 added the live sketch,
-rc2 made its labels readable, rc3 renames the ribbon for expansion past
-beams. Load it to test it; the checks are in its own entry below.
+**`v0.3.0-rc4` is a CANDIDATE, not a release.** rc1 added the live sketch,
+rc2 made its labels readable, rc3 renamed the ribbon for expansion past
+beams, rc4 remembers each project's inputs without remembering its
+intent. Load it to test it; the checks are in its own entry below.
 
 **`v0.2.1` is the last VERIFIED release.** Go back to it if the candidate
 misbehaves.
@@ -56,6 +57,90 @@ Layout follows pyRevit convention — `SimpleBeamRFT.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.0-rc4] — 2026-09-10
+
+The window now remembers this project's inputs, and deliberately forgets
+this project's intent. 485 tests, 29 of 29 guards proven by mutation.
+
+### What is remembered, per project
+
+Detail one beam, pick the next, and these come back already filled: both
+layer counts, the spacer diameter, the aggregate size, the min-spacing
+override, both LD multipliers, the dense and normal stirrup spacings,
+s_max, both face options, the closure type, and the top, bottom and
+stirrup bar types.
+
+Saved after a successful Place, and again when the window closes. Stored
+through pyRevit's own per-document slot, so a different project has its
+own set and never sees this one's.
+
+### What is NOT remembered, and why that is the feature
+
+Three fields come back blank every time: the two main-bar counts and the
+stirrup hook type.
+
+Section U10's own criterion is that restoring values must never restore
+INTENT. Because the Review derivation computes "requested" FROM the
+fields, that is a constraint on what may be stored at all:
+
+| a section is requested by | so this is withheld |
+|---|---|
+| main face: bar type + count | the counts |
+| stirrups: hook type | the hook type |
+| crack bars: crack bar type | the crack bar type |
+
+Withholding exactly those four is what makes Place open DISABLED on a
+fresh beam no matter how much else is remembered.
+`tests/test_ui_persistence.py` proves it by running the real
+`compute_review_derivation` over a full restore and asserting nothing
+reads as requested. Add a withheld field to the stored set later and that
+test fails, rather than the guarantee quietly disappearing.
+
+### Two deliberate omissions from U10's list
+
+**L, b and h are not stored.** They are read from the beam that was
+picked. Showing the last beam's dimensions on a new beam would be wrong
+AND plausible, which is the worst combination.
+
+**Covers are not stored.** U10 lists them, but this window never collects
+them -- they come from the beam's own Revit parameters.
+
+### A guard that could not fail
+
+The mutation prover caught one of the three new guards being incapable of
+failing: it grepped for a call to `script.data_exists(`, and the mutation
+`if False and script.data_exists(...)` left that text intact. Fourth
+occurrence of this class in the project.
+
+The guard now parses `script.py` with `ast` instead of grepping it. That
+was available the whole time -- `ast.parse` reads the file WITHOUT
+importing it, which is the exact reason the file cannot be tested any
+other way. Treating "cannot import" as "can only grep" is what made these
+guards weak. Proven now against all three shapes: check deleted, check
+short-circuited, check not returning.
+
+### What to test on this candidate
+
+Detail two beams in a row in one project. Persistence is invisible any
+other way.
+
+1. Place on beam A, then pick beam B -- the remembered fields should be
+   filled and the three withheld ones empty, with Place disabled.
+2. Close the window without placing, reopen -- same.
+3. Open a DIFFERENT project -- its own values, not this project's.
+
+One caution on pyRevit's slot: the data file is named by project NAME, so
+two documents that share a name share settings.
+
+### Still true from rc1
+
+**Place still does not refuse on a section 6.2-6.4 spacing violation**
+(issue #61) -- the report prints "REFUSED" and the bars go in anyway.
+Still the most consequential thing open, and still about steel rather
+than pixels. Every WPF call remains unverifiable without a host.
+
+---
 
 ## [v0.3.0-rc3] — 2026-09-10
 
