@@ -971,25 +971,83 @@ def test_place_preflight_checks_spacing_before_the_transaction_opens():
     )
     target_name = assign.targets[0].id
 
+    # #61 (round 3) -- deciding whether an arbitrary ENCLOSING `if`/`try`/
+    # `with`/loop can ever be true or reached is undecidable from the AST
+    # (two mutations proved this: `if "error" in geometry:` inverted, and
+    # `if 1 == 2 and "error" not in geometry:`, both leaving no constant
+    # anywhere this test previously looked). The fix in script.py was to
+    # remove the enclosing condition, so the fix here is to require it
+    # stay removed: the call must be a DIRECT statement of on_place_click's
+    # OWN body, `method.body`, not merely reachable via `ast.walk`. That
+    # single positional check subsumes every enclosing-condition trick,
+    # constant or not, because there is no longer an enclosing condition
+    # for one to hide in.
+    assert assign in method.body, (
+        "_spacing_refusal_messages's assignment must be a direct "
+        "statement of on_place_click's own body -- nested inside any "
+        "if/try/with/loop, an enclosing condition could stop it running "
+        "and this guard could not prove that from the AST"
+    )
+
+    # The geometry read is checked for failure IMMEDIATELY before the
+    # spacing preflight, refusing and returning rather than skipping past
+    # it (#61 round 3 -- an inverted `in` -> `not in` here makes the
+    # preflight run only when geometry ALREADY failed to read, which is
+    # never the normal case, and the direct-body check above cannot see
+    # this because the statement shapes are identical either way).
+    geometry_gates = [
+        node for node in method.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Constant)
+        and node.test.left.value == "error"
+        and len(node.test.ops) == 1
+    ]
+    assert geometry_gates, (
+        "on_place_click never checks geometry[\"error\"] as a direct "
+        "statement of its own body before the spacing preflight"
+    )
+    geometry_gate = geometry_gates[0]
+    assert isinstance(geometry_gate.test.ops[0], ast.In), (
+        "the geometry-error check must test `in`, not `not in` -- "
+        "inverted, the preflight beneath it only ever runs when geometry "
+        "has ALREADY failed to read"
+    )
+    assert any(isinstance(n, ast.Return) for n in geometry_gate.body), (
+        "the geometry-error branch must RETURN directly in its body -- "
+        "otherwise an unreadable geometry falls through to the spacing "
+        "preflight instead of refusing"
+    )
+    assert method.body.index(geometry_gate) < method.body.index(assign), (
+        "the geometry-error check must run BEFORE the spacing preflight, "
+        "not after"
+    )
+
     gates = [
-        node for node in ast.walk(method)
+        node for node in method.body
         if isinstance(node, ast.If)
         and isinstance(node.test, ast.Name) and node.test.id == target_name
     ]
     assert gates, (
-        "the preflight's messages are never checked with `if %s:` -- "
-        "computed and never consulted is the same as never computed" % target_name
+        "the preflight's messages are never checked with a top-level "
+        "`if %s:` in on_place_click's own body -- computed and never "
+        "consulted, or gated behind an enclosing condition, is the same "
+        "as never computed" % target_name
     )
+    assert len(gates) == 1, (
+        "on_place_click gates %s more than once -- that is not the "
+        "single-check shape this guard was written against" % target_name
+    )
+    gate = gates[0]
 
-    # No `if` ANYWHERE inside on_place_click may be dead on arrival -- not
-    # only the spacing gate itself. A constant-false test on an ENCLOSING
-    # `if` (`if False and "error" not in geometry:`) leaves the gate's own
-    # `test` looking perfectly innocent while the whole preflight never
-    # runs; checking only `gate.test` (as this test once did) is blind to
-    # that. Only BOOLEAN-context operands are inspected -- `if self.beam is
-    # None:` is a legitimate comparison, and None there is data being
-    # compared, not a short-circuit -- so this descends through
-    # `BoolOp(And/Or)` only, not into `Compare`/`Call` subtrees.
+    # No `if` ANYWHERE inside on_place_click may be dead on arrival. This
+    # is now redundant with the direct-body check above for the assign
+    # and the gate themselves, but it still catches a constant-false
+    # short-circuit on any OTHER `if` in the method (the missing bar
+    # type/hook gate, for one). Only BOOLEAN-context operands are
+    # inspected -- `if self.beam is None:` is a legitimate comparison, not
+    # a short-circuit -- so this descends through `BoolOp(And/Or)` only,
+    # not into `Compare`/`Call` subtrees.
     def _boolop_operands(node):
         if isinstance(node, ast.BoolOp):
             operands = []
@@ -1009,15 +1067,12 @@ def test_place_preflight_checks_spacing_before_the_transaction_opens():
                 % ast.dump(if_node.test)[:120]
             )
 
-    for gate in gates:
-        # The refusal's `return` must be a DIRECT statement in the gate's
-        # own body, not merely reachable by `ast.walk(gate)` -- a `return`
-        # nested under `if False:` inside the gate satisfies `ast.walk`
-        # but can never execute, which is exactly the second shape found
-        # in review: "refuse and return" means the return sits at the top
-        # level of the `if spacing_messages:` block, not buried deeper.
-        assert any(isinstance(n, ast.Return) for n in gate.body), (
-            "the spacing gate must RETURN directly in its body on a "
-            "refusal -- a `return` buried under a nested `if` inside the "
-            "gate is dead code, not a refusal"
-        )
+    # The refusal's `return` must be a DIRECT statement in the gate's own
+    # body, not merely reachable by `ast.walk(gate)` -- a `return` nested
+    # under a further `if` inside the gate satisfies `ast.walk` but can
+    # never execute.
+    assert any(isinstance(n, ast.Return) for n in gate.body), (
+        "the spacing gate must RETURN directly in its body on a "
+        "refusal -- a `return` buried under a nested `if` inside the "
+        "gate is dead code, not a refusal"
+    )

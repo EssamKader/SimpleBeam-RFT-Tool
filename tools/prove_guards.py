@@ -274,53 +274,89 @@ CASES = [
     # #61. The Review report's "REFUSED (section 6.2-6.4)" lines were
     # never consulted at Place, so a face the report said would fail
     # (A43/A44's sub-minimum spacing, A36's option-1-with-multiple-layers)
-    # was placed anyway. All three shapes a text guard can miss, per this
+    # was placed anyway. All the shapes a text guard can miss, per this
     # ticket's own instruction: the check deleted, short-circuited by a
-    # constant, and present but not returning on a refusal.
-    (SCRIPT, "            spacing_messages = self._spacing_refusal_messages(review, geometry)\n",
+    # constant, present but not returning on a refusal, and (round 3)
+    # re-nested behind an enclosing condition that a reachability-based
+    # guard cannot see through -- which is why the guard now requires the
+    # assign and the gate to be DIRECT statements of on_place_click's own
+    # body instead of reasoning about what encloses them.
+    (SCRIPT, "        spacing_messages = self._spacing_refusal_messages(review, geometry)\n",
      "",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the section 6.2-6.4 spacing preflight deleted from Place"),
 
-    (SCRIPT, "            if spacing_messages:",
-     "            if False and spacing_messages:",
+    (SCRIPT, "        if spacing_messages:",
+     "        if False and spacing_messages:",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the spacing gate short-circuited by a constant"),
 
-    (SCRIPT, '                    title="Section 6.2-6.4 spacing violation",\n'
-             "                )\n"
-             "                return\n",
-     '                    title="Section 6.2-6.4 spacing violation",\n'
-     "                )\n",
+    (SCRIPT, '                title="Section 6.2-6.4 spacing violation",\n'
+             "            )\n"
+             "            return\n",
+     '                title="Section 6.2-6.4 spacing violation",\n'
+     "            )\n",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the spacing gate alerting but not returning, so Place proceeds anyway"),
 
-    # A follow-up review on #61 found the guard above checks `gate.test`
-    # only, so an ENCLOSING `if` can be short-circuited by a constant
-    # instead: the whole preflight is skipped, and the gate's own test
-    # never even runs.
-    (SCRIPT, '        if "error" not in geometry:',
-     '        if False and "error" not in geometry:',
+    # Round 3's own review: the preceding geometry-error check inverted,
+    # so the spacing preflight only ever runs when geometry has ALREADY
+    # failed to read -- i.e. never in the normal case. No constant
+    # appears anywhere, so the constant-false sweep does not catch this;
+    # only requiring the assign to sit directly in on_place_click's body
+    # (round 3's fix) can, since the inverted check no longer determines
+    # whether that statement is reachable at all -- it is unconditional.
+    (SCRIPT, "        # statement is a decidable, total check instead: it always runs.\n"
+             "        geometry = self._gather_report_geometry(b_mm, h_mm)\n"
+             '        if "error" in geometry:',
+     "        # statement is a decidable, total check instead: it always runs.\n"
+     "        geometry = self._gather_report_geometry(b_mm, h_mm)\n"
+     '        if "error" not in geometry:',
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
-     "the preflight's ENCLOSING if short-circuited by a constant"),
+     "the preceding geometry-error check inverted, so the preflight "
+     "never runs in the normal case"),
 
-    # And the same review found `return` can be buried under a nested
-    # `if False:` inside the gate: it is still reachable by `ast.walk`, so
-    # a check that only asks "is a Return present somewhere under here"
-    # passes against code that can never execute it.
-    (SCRIPT, "            if spacing_messages:\n"
-             "                forms.alert(\n"
-             '                    "\\n\\n".join(m.message for m in spacing_messages),\n'
-             '                    title="Section 6.2-6.4 spacing violation",\n'
-             "                )\n"
-             "                return\n",
+    # And the same review found the assign+gate can be RE-NESTED behind a
+    # condition that is always false but names no constant a naive sweep
+    # would catch (`if 1 == 2:`, not `if False:`). The direct-body check
+    # closes this because there is no longer an enclosing `if` for either
+    # statement to legally sit inside.
+    (SCRIPT, "        spacing_messages = self._spacing_refusal_messages(review, geometry)\n"
+             "        if spacing_messages:\n"
+             "            forms.alert(\n"
+             '                "\\n\\n".join(m.message for m in spacing_messages),\n'
+             '                title="Section 6.2-6.4 spacing violation",\n'
+             "            )\n"
+             "            return\n",
+     "        if 1 == 2:\n"
+     "            spacing_messages = self._spacing_refusal_messages(review, geometry)\n"
      "            if spacing_messages:\n"
-     "                if False:\n"
-     "                    forms.alert(\n"
-     '                        "\\n\\n".join(m.message for m in spacing_messages),\n'
-     '                        title="Section 6.2-6.4 spacing violation",\n'
-     "                    )\n"
-     "                    return\n",
+     "                forms.alert(\n"
+     '                    "\\n\\n".join(m.message for m in spacing_messages),\n'
+     '                    title="Section 6.2-6.4 spacing violation",\n'
+     "                )\n"
+     "                return\n",
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the preflight re-nested inside an always-false non-constant "
+     "condition (if 1 == 2:)"),
+
+    # And the same round-2 review found `return` can be buried under a
+    # nested `if False:` inside the gate: it is still reachable by
+    # `ast.walk`, so a check that only asks "is a Return present somewhere
+    # under here" passes against code that can never execute it.
+    (SCRIPT, "        if spacing_messages:\n"
+             "            forms.alert(\n"
+             '                "\\n\\n".join(m.message for m in spacing_messages),\n'
+             '                title="Section 6.2-6.4 spacing violation",\n'
+             "            )\n"
+             "            return\n",
+     "        if spacing_messages:\n"
+     "            if False:\n"
+     "                forms.alert(\n"
+     '                    "\\n\\n".join(m.message for m in spacing_messages),\n'
+     '                    title="Section 6.2-6.4 spacing violation",\n'
+     "                )\n"
+     "                return\n",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the refusal's return buried under a nested if False, so it never runs"),
 ]

@@ -2466,15 +2466,29 @@ class SimpleBeamWindow(forms.WPFWindow):
         # placed anyway. Geometry gathered the same way the Review tab
         # gathers it (cached support detection, no Revit call), so this
         # runs entirely before any transaction opens.
+        #
+        # Both checks below are DELIBERATELY direct statements of this
+        # method's body, not nested inside an `if`/`try`/`with`/loop --
+        # not for style, but because a nested preflight is a reachability
+        # judgement (is this branch ever taken?), and #61's own guard
+        # proved that judgement is unwinnable from the AST. A flat
+        # statement is a decidable, total check instead: it always runs.
         geometry = self._gather_report_geometry(b_mm, h_mm)
-        if "error" not in geometry:
-            spacing_messages = self._spacing_refusal_messages(review, geometry)
-            if spacing_messages:
-                forms.alert(
-                    "\n\n".join(m.message for m in spacing_messages),
-                    title="Section 6.2-6.4 spacing violation",
-                )
-                return
+        if "error" in geometry:
+            # _do_place raises this SAME message from the SAME dict key
+            # (A46's transaction has to refuse on it too, for every other
+            # caller of _do_place) -- reported here, verbatim, before a
+            # transaction opens rather than after one rolls back.
+            forms.alert(geometry["error"], title="Could not check placement")
+            return
+
+        spacing_messages = self._spacing_refusal_messages(review, geometry)
+        if spacing_messages:
+            forms.alert(
+                "\n\n".join(m.message for m in spacing_messages),
+                title="Section 6.2-6.4 spacing violation",
+            )
+            return
 
         # A Transaction started from a modeless window's handler fails
         # exactly the way the pick did, so it goes through the same
