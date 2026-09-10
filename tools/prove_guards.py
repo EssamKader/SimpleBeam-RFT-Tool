@@ -45,6 +45,12 @@ T = "tests/test_simple_beam_xaml.py::"
 WORKFLOW = ".github/workflows/tests.yml"
 VERSION_FILE = "SimpleBeamRFT.extension/VERSION"
 
+# Read the CURRENT version rather than naming one. This case broke on the
+# very first release after it was written (VERSION had moved to rc3 while
+# the case still looked for rc2), which would have quietly become "one
+# guard unproven" at every future bump.
+VERSION_NOW = io.open(VERSION_FILE, encoding="utf-8").read().strip()
+
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
 CATCH_ANCHOR = ("        except Exception as ex:\n"
                 "            # NEVER let this reach the ExternalEvent handler")
@@ -393,7 +399,7 @@ CASES = [
     (XAML, 'Title="Simple Beam"', 'Title="Detail Beam"', 'tests/test_simple_beam_xaml.py::test_the_window_names_the_build_it_is_running',
      "the pre-rc3 window title returning"),
 
-    (VERSION_FILE, "v0.3.1-rc2", "v0.3.0", 'tests/test_simple_beam_xaml.py::test_the_version_file_matches_the_newest_changelog_entry',
+    (VERSION_FILE, VERSION_NOW, "v0.0.0-not-a-release", 'tests/test_simple_beam_xaml.py::test_the_version_file_matches_the_newest_changelog_entry',
      "VERSION bumped out of step with the changelog"),
 
     # #65: a main face with a bar count entered but missing its bar type
