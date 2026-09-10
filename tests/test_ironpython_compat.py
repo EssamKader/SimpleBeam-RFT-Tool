@@ -277,3 +277,30 @@ def test_every_path_the_ci_workflow_names_exists():
         "%s: these paths are named by CI but do not exist in the tree, so "
         "the job fails on every push: %s"
         % (os.path.relpath(workflow_path, REPO_ROOT).replace("\\", "/"), missing))
+
+    # The other half, and it is the half that catches a MISTYPED path
+    # rather than a stale one.
+    #
+    # The check above asks "does everything CI names exist". It cannot
+    # catch `RFT.lib` becoming `RFTlib`, because the mutated token stops
+    # looking like a path at all and is skipped -- proven by the prover,
+    # which reported MISSED on exactly that mutation. Guessing which
+    # tokens are paths is the wrong question.
+    #
+    # So ask the opposite, discovered from the filesystem: every loadable
+    # bundle that EXISTS must be named by some CI command. A mistyped path
+    # then leaves the real folder unmentioned. This also means a second
+    # element's extension cannot be added to the repo without adding it to
+    # CI, which is the outcome to want.
+    joined = " ".join(commands)
+    bundles = sorted(
+        name for name in os.listdir(REPO_ROOT)
+        if os.path.isdir(os.path.join(REPO_ROOT, name))
+        and (name.lower().endswith(".lib") or name.lower().endswith(".extension")))
+    assert bundles, (
+        "guard the guard: no .lib or .extension bundle found at the repo "
+        "root, so the loop below would check nothing")
+    unmentioned = [name for name in bundles if name not in joined]
+    assert not unmentioned, (
+        "these bundles exist in the tree but no CI command names them, so "
+        "nothing in them is compiled: %s" % unmentioned)
