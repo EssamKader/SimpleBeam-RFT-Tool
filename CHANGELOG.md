@@ -6,9 +6,9 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.3.0-rc1` is a CANDIDATE, not a release.** It adds the live sketch,
-which is ~470 lines of WPF that nothing outside Revit can execute. Load it
-to test it; the seven checks are in its own entry below.
+**`v0.3.0-rc2` is a CANDIDATE, not a release.** rc1 added the live sketch
+and drew it illegibly; rc2 fixes the labels. Load it to test it; the
+checks are in its own entry below.
 
 **`v0.2.1` is the last VERIFIED release.** Go back to it if the candidate
 misbehaves.
@@ -56,6 +56,91 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.0-rc2] — 2026-09-10
+
+rc1's sketch drew the right numbers illegibly. This fixes that and nothing
+else: no dimension changed, and every number still comes from `rft.core`
+(A48).
+
+### What rc1 looked like on a real beam
+
+From the first live run, a 9600 mm span with three stirrup zones:
+
+- A **105-character sentence** drawn across the middle of the elevation,
+  colliding with two zone labels and running off the right edge mid-word.
+  It also said exactly what the caption under the canvas already said.
+- **"A7 clearanc"** — cut off at the support. The scale fit bounded each
+  label by its ANCHOR POINT, so a label near the edge lost its tail.
+- **`172.9 mm (PASS)` drawn on top of `172.8 mm (PASS)`** — two layers
+  0.1 mm apart, with nothing resolving the collision.
+- **58 schematic ticks** merged into a solid hatch that hid the bar runs
+  behind them.
+- A **16 mm bar rendered about 2 px across**: correct to scale, invisible.
+
+### The fix
+
+`rft.ui.sketch_layout` (new, pure, 13 tests) decides where every label
+goes: clamped inside the canvas so nothing is ever cut off, and pushed a
+line apart when two would overlap. Order is priority — dimension labels
+keep the position they ask for, captions move out of the way.
+
+It is a module rather than inline renderer code for the reason everything
+else has left `script.py`: that file imports `pyrevit` and cannot be
+imported, so nothing in it can be executed by a test, and
+ordering-dependent placement is exactly the kind of logic that reads
+correctly and then draws one sentence across another.
+
+A **label-length cap** is enforced at the source, over every label all
+three views can emit — including the awkward paths (a refused end, a
+failing spacing), which is where the long strings lived. It immediately
+found two more that had been missed, one of them the replacement text
+written for this very ticket.
+
+Also: bars get a minimum drawn radius (the POSITION stays exact; only the
+symbol drawn at it gets a floor, as `docs/ui/sketch-notation.svg` draws
+them anyway); `MAX_SCHEMATIC_TICKS_PER_ZONE` 24 -> 8; section canvases
+260 -> 420 px.
+
+Simulated at the owner's own canvas width: 7 labels, longest 20
+characters, none clipped, none overlapping.
+
+### What was deliberately NOT done
+
+The schematic notes were shortened, not deleted. #49 requires the
+schematic elements to be labelled AS schematic ON the drawing, so the
+marker stays ("ticks SCHEMATIC", "bend SCHEMATIC") and only the
+explanation of why moves to the caption. Three of #49's tests pinned the
+old prose; updating them to assert the requirement rather than the wording
+is right, but deleting the word would have traded one ticket's
+requirement for another's -- so that is now its own test.
+
+### A guard a comment could satisfy is not a guard
+
+The prover reported MISSED on one of the new guards, and was right to. The
+mutation replaced the real call with `boxes  # place_labels(...)`, and the
+guard -- a plain substring check -- was satisfied by the COMMENT. The call
+was gone and the check passed.
+
+Third time this repo has found a check incapable of failing, after the two
+written with a literal backspace byte where a regex word boundary
+belonged. Fixed by strengthening the guard (it strips comments now)
+rather than weakening the mutation, since a real inlining would plausibly
+leave a comment naming what it replaced. The mutation prover is the only
+thing that has ever caught any of the three.
+
+### Numbers
+
+Tests: 442 -> 459. Guards proven by mutation: 24 -> 26.
+
+### Still true from rc1
+
+Every WPF call remains unverifiable without a host, and **Place still does
+not refuse on a section 6.2-6.4 spacing violation** (issue #61) -- the
+report prints "REFUSED" and the bars go in anyway. That one affects steel
+rather than pixels.
+
+---
 
 ## [v0.3.0-rc1] — 2026-09-10
 
