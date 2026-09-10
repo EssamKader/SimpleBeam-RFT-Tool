@@ -264,6 +264,52 @@ def _end_support(document, point, axis, beam_id):
     return support, width_mm
 
 
+def _support_detection(support_start, support_end, start_pt, end_pt, axis,
+                       support_width_start_mm, support_width_end_mm,
+                       support_cover_start_mm, support_cover_end_mm):
+    """The ONE place the support-detection dict's shape is written.
+
+    Two callers need it: ``_detect_supports_uncached``, which scans for
+    the supports itself, and ``_pick_beam_in_context``, which has already
+    scanned and only needs the result cached so the live sketch can read
+    plain numbers off the UI thread (#49). Before this existed the second
+    caller spelled out all twelve keys again. It agreed exactly with the
+    first -- which is how the duplicated ZONE_LAYOUT_FLAGS agreed too,
+    for three releases, while the report and the placer described
+    different stirrup sets.
+
+    The derived fields are derived HERE rather than passed in, for the
+    same reason: ``is_supported_*`` is "a support was found" and ``l_mm``
+    is the centre-to-centre span, which exists only when both ends are
+    supported. Two callers deriving those separately is two chances to
+    derive them differently.
+    """
+    is_supported_start = support_start is not None
+    is_supported_end = support_end is not None
+    l_mm = None
+    if is_supported_start and is_supported_end:
+        l_mm = span_length_mm(support_start, support_end, internal_to_mm)
+    return {
+        # The support ELEMENTS, not just their measurements: placement
+        # needs them for the support-face reference points and for the
+        # stirrup zones' centre-to-centre datum, from the same detection
+        # pass the report uses, so the two cannot disagree about which
+        # element supports which end (#56).
+        "support_start": support_start,
+        "support_end": support_end,
+        "start_pt": start_pt,
+        "end_pt": end_pt,
+        "axis": axis,
+        "is_supported_start": is_supported_start,
+        "is_supported_end": is_supported_end,
+        "support_width_start_mm": support_width_start_mm,
+        "support_width_end_mm": support_width_end_mm,
+        "support_cover_start_mm": support_cover_start_mm,
+        "support_cover_end_mm": support_cover_end_mm,
+        "l_mm": l_mm,
+    }
+
+
 def _format_cover_mm(value_mm):
     """Never format ``None`` numerically -- the exact rc5 crash this
     project already hit once (``"{:.1f}".format(None)``). ``None`` here
@@ -1351,29 +1397,11 @@ class DetailBeamWindow(forms.WPFWindow):
         except HostValidationError as ex:
             return {"error": "Support cover read-back failed -- {}".format(ex)}
 
-        l_mm = None
-        if is_supported_start and is_supported_end:
-            l_mm = span_length_mm(support_start, support_end, internal_to_mm)
-
-        return {
-            # The support ELEMENTS, not just their measurements: placement
-            # needs them for the support-face reference points and for the
-            # stirrup zones' centre-to-centre datum. Returned from the same
-            # detection pass the report uses so the two cannot disagree
-            # about which element supports which end (#56).
-            "support_start": support_start,
-            "support_end": support_end,
-            "start_pt": start_pt,
-            "end_pt": end_pt,
-            "axis": axis,
-            "is_supported_start": is_supported_start,
-            "is_supported_end": is_supported_end,
-            "support_width_start_mm": support_width_start_mm,
-            "support_width_end_mm": support_width_end_mm,
-            "support_cover_start_mm": support_cover_start_mm,
-            "support_cover_end_mm": support_cover_end_mm,
-            "l_mm": l_mm,
-        }
+        return _support_detection(
+            support_start, support_end, start_pt, end_pt, axis,
+            support_width_start_mm, support_width_end_mm,
+            support_cover_start_mm, support_cover_end_mm,
+        )
 
     def _gather_report_geometry(self, b_mm, h_mm):
         """Beam/support geometry the report needs: the cached support
@@ -1636,30 +1664,23 @@ class DetailBeamWindow(forms.WPFWindow):
         # --- everything above succeeded: populate and enable the fields.
         self.beam = beam
         self.host_data = host_data
-        # #49 (U5) -- caches EXACTLY what _detect_supports_uncached would
-        # have computed, from the scan this method already ran, so the
-        # live sketch (which must never call the Revit API outside this
-        # dispatched context, #57) can read the plain-number fields
-        # (is_supported_*, support_width_*_mm, l_mm) straight off
-        # self._support_detection without triggering a second scan or an
-        # InvalidOperationException from the UI thread.
-        self._support_detection = {
-            "support_start": support_start,
-            "support_end": support_end,
-            "start_pt": start_pt,
-            "end_pt": end_pt,
-            "axis": axis,
-            "is_supported_start": is_supported_start,
-            "is_supported_end": is_supported_end,
-            "support_width_start_mm": support_width_start_mm,
-            "support_width_end_mm": support_width_end_mm,
-            "support_cover_start_mm": support_cover_start_mm,
-            "support_cover_end_mm": support_cover_end_mm,
-            "l_mm": (
-                span_length_mm(support_start, support_end, internal_to_mm)
-                if is_supported_start and is_supported_end else None
-            ),
-        }
+        # #49 (U5) -- the live sketch reads support/span data on the UI
+        # thread, where a Revit API call would raise
+        # InvalidOperationException (#57). This pick is already dispatched
+        # and has just done the detection, so it fills the cache from what
+        # it already computed and the redraw handler reads only plain
+        # numbers.
+        #
+        # Built through the SAME constructor _detect_supports_uncached
+        # returns, not a second dict literal. The review of #49 found one
+        # here that listed all twelve keys again; it agreed exactly, which
+        # is precisely how the duplicated ZONE_LAYOUT_FLAGS agreed right
+        # up until it did not. One writer for one shape.
+        self._support_detection = _support_detection(
+            support_start, support_end, start_pt, end_pt, axis,
+            support_width_start_mm, support_width_end_mm,
+            support_cover_start_mm, support_cover_end_mm,
+        )
         # #48 -- set BEFORE ``h_tb.Text`` below, whose ``TextChanged`` fires
         # ``_on_h_or_layout_changed`` -> ``_refresh_h_avail`` immediately:
         # H_avail needs ``self.beam_covers_mm`` already set to compute

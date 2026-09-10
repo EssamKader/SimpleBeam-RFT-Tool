@@ -530,6 +530,36 @@ def test_report_and_placement_both_use_the_shared_plan():
     )
 
 
+def test_the_support_detection_dict_has_exactly_one_writer():
+    """#49's review finding, guarded.
+
+    Two callers need the support-detection dict: the lazy detector that
+    scans for the supports, and the pick handler that has already scanned
+    and only needs the result cached so the live sketch can read plain
+    numbers off the UI thread. #49 gave the second one its own dict
+    literal, listing all twelve keys again.
+
+    It agreed exactly with the first. So did rft.core.plan's private copy
+    of ZONE_LAYOUT_FLAGS, for three releases, while the Review report and
+    the placer described different stirrup sets -- identical steel,
+    described wrongly, invisible because the totals matched.
+
+    A second copy of a shape is not a shortcut; it is a second answer
+    waiting to be given. This counts the writers.
+    """
+    text = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    writers = text.count('"support_width_start_mm":')
+    assert writers == 1, (
+        "the support-detection dict is built in %d places. Build it in "
+        "_support_detection() and call that, so the shape and its derived "
+        "fields (is_supported_*, l_mm) have one definition." % writers
+    )
+    assert "def _support_detection(" in text, (
+        "this test no longer describes the code it guards: the shared "
+        "constructor it was written about is gone."
+    )
+
+
 def test_the_placer_does_not_rebuild_a_face_plan_for_the_crack_offsets():
     """The other half of the same fix, and the half a "uses the plan
     module" check cannot see.
