@@ -236,8 +236,17 @@ CASES = [
 
     # pyRevit's load_data opens the file directly and RAISES when nothing
     # has been stored -- which is the normal first run on any project.
-    (SCRIPT, "            if not script.data_exists(",
-     "            if False and script.data_exists(",
+    #
+    # The mutation DELETES the gate, which is the realistic regression:
+    # someone "simplifies" two lines that look redundant. The first
+    # version of this case flipped the test to `if False and ...` instead
+    # and the prover reported MISSED -- because the guard was grepping for
+    # "script.data_exists(", which that mutation leaves in place. The
+    # guard now parses the method with ast; all three shapes (deleted,
+    # short-circuited, and gating without returning) are caught.
+    (SCRIPT, "            if not script.data_exists(\n"
+             "                    ui_persistence.SETTINGS_SLOT, this_project=True):\n"
+             "                return\n", "",
      T + "test_a_first_run_checks_before_loading_stored_data",
      "loading stored data without checking it exists"),
 ]

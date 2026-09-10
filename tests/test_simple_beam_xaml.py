@@ -834,11 +834,59 @@ def test_a_first_run_checks_before_loading_stored_data():
     """pyRevit's load_data opens the file directly and RAISES when nothing
     has been stored yet -- which is the normal first run on any project.
     The existence check is not optional, and the wrapper is not either.
+
+    Checked with ast rather than by grepping for the call. The first
+    version of this test looked for the substring "script.data_exists(",
+    and the prover MISSED its own mutation: `if False and
+    script.data_exists(...)` still contains that substring, so the check
+    was bypassed and the test stayed green. Parsing is available here --
+    ast.parse reads the file without importing it, which is the whole
+    reason script.py cannot be tested any other way.
     """
-    body = _code_only(_method_body("_restore_project_inputs"))
-    assert "script.data_exists(" in body, (
-        "load_data raises on a first run; check data_exists first"
+    import ast
+
+    tree = ast.parse(io.open(SCRIPT_PATH, encoding="utf-8").read())
+    method = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_restore_project_inputs":
+            method = node
+    assert method is not None, "_restore_project_inputs is gone"
+
+    def _calls(node):
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Attribute):
+                    found.add(func.attr)
+        return found
+
+    assert "load_data" in _calls(method), "nothing loads the stored data"
+
+    # The load must be GATED by an existence check that can actually fire.
+    gates = [
+        node for node in ast.walk(method)
+        if isinstance(node, ast.If) and "data_exists" in _calls(node.test)
+    ]
+    assert gates, (
+        "load_data raises on a first run, which is every project's first "
+        "run -- it must be gated by script.data_exists"
     )
+    for gate in gates:
+        # `if False and script.data_exists(...)` reads as a gate and is
+        # not one. Any constant falsehood in the test disqualifies it.
+        for child in ast.walk(gate.test):
+            value = getattr(child, "value", None)
+            assert not (isinstance(child, ast.Constant) and value in (False, 0, None)), (
+                "the existence check is short-circuited by a constant, so "
+                "it never runs: %s" % ast.dump(gate.test)[:120]
+            )
+        assert any(isinstance(n, ast.Return) for n in ast.walk(gate)), (
+            "the existence check must RETURN when there is nothing stored, "
+            "not fall through to the load"
+        )
+
+    body = _code_only(_method_body("_restore_project_inputs"))
     assert "except Exception:" in body, (
         "restoring runs while the window is opening -- a settings file is "
         "not worth failing to open the tool over"
