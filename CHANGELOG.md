@@ -6,9 +6,10 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.3.0` is the current VERIFIED release** -- confirmed on a live host
-by the project owner. It is `v0.3.0-rc4`'s tree: the live sketch, readable
-labels, the `RFT-Tools` ribbon, and per-project persistence.
+**`v0.3.0` is NOT verified** -- see the correction in its entry below. It
+was released on a reported test of `v0.3.0-rc4` that had in fact been run
+against `v0.3.0-rc3`, because the deployed worktree was never moved.
+**`v0.2.1` remains the last release confirmed on a live host.**
 
 **`v0.3.1-rc2` is the CANDIDATE to test**, and it supersedes `rc1`, which
 was never loaded on a host. It carries rc1's library move to `RFT.lib`
@@ -20,8 +21,8 @@ trusting anything else you see. Read its install note first --
 registering it beside `v0.3.0` gives you two buttons both called Simple
 Beam, which is the one way to make this confusing.
 
-**`v0.2.1` is the previous verified release.** Go back to it only if
-`v0.3.0` misbehaves.
+**`v0.2.1` is the last VERIFIED release.** Go back to it if a candidate
+misbehaves.
 The single `Detail Beam` window opens, picks a beam, reports its plan and
 places main bars, stirrups and crack bars in a live Revit 2024 session --
 confirmed by the project owner on `v0.2.0` and again on `v0.2.1` after the
@@ -376,9 +377,19 @@ this repo by default rather than by decision. See
 
 ## [v0.3.0] — 2026-09-10
 
-**VERIFIED on a live host.** The project owner loaded `v0.3.0-rc4` in a
-Revit session and confirmed it. This tag is that tree: the extension is
-byte-identical to `v0.3.0-rc4` (`git diff v0.3.0-rc4 v0.3.0 --
+**CORRECTION, 2026-09-10: this tag is NOT verified.** It was published
+claiming the project owner had loaded `v0.3.0-rc4` and confirmed it. He
+had not. The deployed worktree at the registered pyRevit search path was
+still checked out at `v0.3.0-rc3` -- its checkout history ends there, and
+neither #54 nor anything after it was ever loaded. The "I tested it" that
+this release was cut on was a test of **rc3**.
+
+The claim was mine to check and I did not check it, which is precisely
+why `v0.3.1-rc2` stamps the loaded version into the window title. Nothing
+in this tag is known to be broken; it is simply **unverified**, and
+`v0.2.1` remains the last release confirmed on a live host.
+
+This tag is `v0.3.0-rc4`'s tree: the extension is byte-identical to it (`git diff v0.3.0-rc4 v0.3.0 --
 SimpleBeamRFT.extension` is empty; the commits between them touch only
 `docs/`, CI and the test tooling).
 
