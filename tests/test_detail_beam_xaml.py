@@ -41,6 +41,11 @@ NON_XAML_SELF_ATTRS = {
     "crack_bar_type", "stirrup_hook_type", "stirrup_hook_angle_deg",
     # #48 (U4) -- ordinary Python state, not an x:Name control.
     "beam_covers_mm",
+    # The two caches. ``_diameter_cache_mm`` is DOCUMENT-scoped (a bar
+    # type's diameter has nothing to do with the picked beam) and so is
+    # deliberately absent from BEAM_SCOPED_ATTRS below;
+    # ``_support_detection`` is beam-scoped and appears in both lists.
+    "_diameter_cache_mm", "_support_detection",
     # #57 -- the dispatch guard, plus one INHERITED WPF member:
     # Window.Dispatcher is a real attribute of the base class, not an
     # x:Name control, so it belongs here for the same reason ordinary
@@ -230,7 +235,12 @@ def test_x_name_values_are_unique():
 # otherwise the previous beam's value survives into the next beam with
 # nothing to indicate it. Document-scoped state (the bar-type selections)
 # is deliberately NOT here: those outlive a re-pick on purpose.
-BEAM_SCOPED_ATTRS = ("beam", "host_data", "beam_covers_mm", "geometry_mm")
+BEAM_SCOPED_ATTRS = (
+    "beam", "host_data", "beam_covers_mm", "geometry_mm",
+    # The cached support detection: the previous beam's supports would
+    # report and place against the wrong span, plausibly and silently.
+    "_support_detection",
+)
 
 
 def _reset_beam_state_body():
@@ -454,7 +464,16 @@ def test_report_and_placement_both_use_the_shared_plan():
     # first version of this assertion survived exactly that change.
     required = {
         "_report_one_main_face": ("face_layer_plans", "end_plan"),
-        "_build_placement_plans": ("face_plan", "stirrup_plan", "crack_plan"),
+        "_build_placement_plans": (
+            "face_plan", "stirrup_plan", "crack_plan",
+            # The crack plan's two H_avail offsets. Before this call
+            # existed the placer built a WHOLE FacePlan per face just to
+            # read its last layer -- a second time for faces it had
+            # already built -- and a FacePlan needs a per-layer bar
+            # count, which a face that is detailed but not placed does
+            # not have.
+            "innermost_layer_offset_mm",
+        ),
     }
     for method, calls in required.items():
         body = _method_body(method)
@@ -464,6 +483,33 @@ def test_report_and_placement_both_use_the_shared_plan():
                 "compute them itself -- otherwise the Review report and the "
                 "placed steel can disagree (#56)." % (method, call)
             )
+
+
+def test_the_placer_does_not_rebuild_a_face_plan_for_the_crack_offsets():
+    """The other half of the same fix, and the half a "uses the plan
+    module" check cannot see.
+
+    ``core_plan.innermost_layer_offset_mm`` can be present and the old
+    ``_face(True).layers[-1].offset_mm`` can still be sitting next to it.
+    That expression is what crashed: a FacePlan needs a per-layer BAR
+    count, A50 only requires a face to be DETAILED (bar type + layer
+    count), so detailing both faces while placing only one raised a
+    TypeError from inside the bar-position arithmetic -- with the
+    transaction already open, for a combination the derivation had just
+    declared valid.
+    """
+    body = _method_body("_build_placement_plans")
+    assert "layers[-1]" not in body, (
+        "_build_placement_plans reads a layer off a FacePlan again. The "
+        "crack plan's H_avail offsets must come from "
+        "core_plan.innermost_layer_offset_mm, which needs no bar count."
+    )
+    # SELF-GUARD: if _face() itself ever disappears this test would pass
+    # for the wrong reason -- there would be no FacePlan to misread.
+    assert "def _face(" in body, (
+        "this test no longer describes the code it guards: the per-face "
+        "closure it was written about is gone."
+    )
 
 
 def test_the_placement_stub_is_gone():

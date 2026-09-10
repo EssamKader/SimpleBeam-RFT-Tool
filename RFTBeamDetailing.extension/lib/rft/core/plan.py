@@ -108,6 +108,38 @@ def face_layer_plans(is_top, h_mm, b_mm, cover_face_mm, cover_side_mm,
     return plans
 
 
+def innermost_layer_offset_mm(cover_face_mm, stirrup_dia_mm, bar_dia_mm,
+                              spacer_dia_mm, layer_count):
+    """Where one face's INNERMOST main-bar layer sits (section 4.1) -- the
+    only thing section 5.1's ``H_avail`` needs to know about that face.
+
+    Note the innermost layer is layer number ``layer_count``, not layer 1:
+    section 4.1 counts outwards from the concrete face, so the LAST layer
+    is the one nearest the beam's centre. That fact was being re-stated at
+    three call sites (the live H_avail readout, the report, the placer),
+    each spelling it a slightly different way; it is stated here once.
+
+    Why this exists separately from ``face_layer_plans``, which also
+    reports it as ``layers[-1].offset_mm``: a full face plan needs the
+    per-layer BAR COUNT, because it also computes every bar's ``u``.
+    ``H_avail`` needs no bar count at all. A50 requires both faces to be
+    DETAILED -- a bar type and a layer count each -- but a face can be
+    detailed without being PLACED, and an unplaced face has no bar count
+    (A42/#50 made the faces independent; #48 made a blank count mean
+    blank rather than a default).
+
+    So building a whole ``FacePlan`` just to read this one number was not
+    merely wasteful. With a blank bar count it raised ``TypeError: '<' not
+    supported between instances of 'NoneType' and 'int'`` from inside
+    ``corner_bar_u_positions_mm``, with the transaction already open, for
+    a combination the derivation had explicitly declared valid: both faces
+    detailed, only one of them placed, crack bars requested.
+    """
+    return layer_offset_mm(
+        cover_face_mm, stirrup_dia_mm, bar_dia_mm, spacer_dia_mm, layer_count
+    )
+
+
 def end_plan(is_supported, is_top, support_width_mm, support_cover_mm,
              dia_own_mm, dia_other_mm, ld_mm, cover_end_mm, end_label):
     """The anchorage at one end of one face.

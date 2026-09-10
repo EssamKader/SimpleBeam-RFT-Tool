@@ -267,3 +267,83 @@ def test_crack_bars_are_one_per_side():
     )
     assert len(result.u_positions_mm) == 2
     assert result.u_positions_mm[0] == pytest.approx(-result.u_positions_mm[1])
+
+
+# --- the innermost layer offset, which H_avail is measured to ---------------
+
+
+def test_innermost_offset_matches_the_last_layer_of_a_full_face_plan():
+    """The number this replaces: ``face_plan(...).layers[-1].offset_mm``.
+
+    They must agree exactly, because the crack plan used to be fed the
+    second and is now fed the first. If these two ever diverge, H_avail
+    silently moves and every crack bar moves with it.
+    """
+    for layer_count in (1, 2, 3):
+        face = _bottom_face(layer_count=layer_count)
+        assert plan.innermost_layer_offset_mm(
+            COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, layer_count
+        ) == pytest.approx(face.layers[-1].offset_mm)
+
+
+def test_the_innermost_layer_is_the_last_one_not_the_first():
+    """Section 4.1 counts outwards from the concrete face, so the layer
+    NEAREST the beam's centre is layer ``layer_count``. Reading layer 1
+    instead would compute H_avail between the OUTERMOST layers -- larger
+    than the truth, so too many crack layers, the last of them sitting on
+    top of a main bar.
+    """
+    outermost = plan.innermost_layer_offset_mm(
+        COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 1
+    )
+    innermost = plan.innermost_layer_offset_mm(
+        COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 3
+    )
+    assert innermost > outermost
+
+
+def test_the_innermost_offset_needs_no_bar_count():
+    """The defect this function exists to remove, stated as a test.
+
+    A50 requires both faces to be DETAILED -- a bar type and a layer
+    count -- before crack bars can be planned. It does NOT require both
+    faces to be PLACED, and an unplaced face has no bar count (#48: blank
+    means blank, never a default).
+
+    The placer used to read this offset off a full ``face_plan``, which
+    needs the per-layer bar count because it also computes every bar's
+    ``u``. With that count blank it raised ``TypeError: '<' not supported
+    between instances of 'NoneType' and 'int'`` from inside the bar
+    position arithmetic -- with the transaction already open, for a
+    combination the derivation had just declared valid.
+    """
+    with pytest.raises(TypeError):
+        plan.face_plan(
+            True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
+            STIRRUP_DIA_MM, BAR_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM,
+            None, 2, 55.0,
+            True, 400.0, 40.0, True, 400.0, 40.0,
+        )
+
+    # The same inputs, asking only for what H_avail actually needs.
+    assert plan.innermost_layer_offset_mm(
+        COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 2
+    ) == pytest.approx(75.0)
+
+
+def test_a_crack_plan_survives_one_face_being_detailed_but_not_placed():
+    """End to end over the combination that used to crash: both faces
+    detailed with 2 layers each, only the bottom face carrying a bar
+    count, crack bars requested.
+    """
+    offsets = [
+        plan.innermost_layer_offset_mm(
+            COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 2
+        )
+        for _ in range(2)
+    ]
+    result = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, 12.0, offsets[0], offsets[1], 200.0
+    )
+    assert result.h_avail_mm == pytest.approx(H_MM - offsets[0] - offsets[1])
+    assert result.n_layers >= 1

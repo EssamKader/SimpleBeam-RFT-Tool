@@ -290,6 +290,9 @@ class DetailBeamWindow(forms.WPFWindow):
         self.beam = None
         self.host_data = None
         self.geometry_mm = None
+        # Support detection for the picked beam -- see ``_detect_supports``.
+        # BEAM-scoped, so it is cleared on every pick along with the rest.
+        self._support_detection = None
         # #48 -- the beam's own top/bottom cover, kept as NUMBERS (not just
         # formatted into a TextBlock) so H_avail (rev 2 section 5.1, A26)
         # can be computed live without a second read of the model. Cleared
@@ -303,6 +306,12 @@ class DetailBeamWindow(forms.WPFWindow):
         self._api_call_in_flight = False
         self._bar_type_options_by_role = {}
         self._hook_type_options = []
+        # Measured bar diameters, keyed by RebarBarType id -- see
+        # ``_diameter_mm``. DOCUMENT-scoped like the picker options above,
+        # not beam-scoped: a bar type's diameter has nothing to do with
+        # which beam is picked, so this is deliberately NOT cleared by
+        # ``_reset_beam_state``.
+        self._diameter_cache_mm = {}
 
         # The window's TITLE-BAR icon, which is a different property from
         # the ribbon button's artwork: pyRevit reads icon.png for the
@@ -358,6 +367,35 @@ class DetailBeamWindow(forms.WPFWindow):
         self._refresh_review_derivation()
 
     # ------------------------------------------------------- bar/hook types
+    def _diameter_mm(self, bar_type):
+        """One ``RebarBarType``'s MEASURED diameter, read from the model
+        once per type and remembered. ``None`` in, ``None`` out -- an
+        unpicked role has no diameter, and every caller here already has
+        to handle that (A42 forbids inventing one).
+
+        ``bar_type_diameter_mm`` is a Revit parameter read, and
+        ``_refresh_h_avail`` made three of them on EVERY KEYSTROKE in
+        `h`, in either layer count, and in the spacer field -- on the UI
+        thread, while the engineer is typing. A bar type's diameter cannot
+        change while this window is open (the type would have to be
+        edited in the document, and a pyRevit reload picks that up), so
+        one read per type is the same number without the traffic.
+
+        Keyed by the element id as a STRING, not by the element: two
+        wrappers for the same type are separate Python objects, and
+        ``ElementId.IntegerValue`` is deprecated in the Revit versions
+        this tool targets. A key that failed to match would only ever
+        cause a re-read, never a wrong number.
+        """
+        if bar_type is None:
+            return None
+        key = str(bar_type.Id)
+        if key not in self._diameter_cache_mm:
+            self._diameter_cache_mm[key] = bar_type_diameter_mm(
+                bar_type, internal_to_mm
+            )
+        return self._diameter_cache_mm[key]
+
     def _populate_material_pickers(self):
         """Fills each role's ComboBox from ``bar_types.bar_type_options``/
         ``hook_type_options`` -- the measured-diameter labelling A42/#27
@@ -598,18 +636,9 @@ class DetailBeamWindow(forms.WPFWindow):
             return
 
         h_mm = ui_inputs.try_parse_float(self.h_tb.Text)
-        top_bar_dia_mm = (
-            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
-            if self.selection.top_main_bar_type is not None else None
-        )
-        btm_bar_dia_mm = (
-            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
-            if self.selection.bottom_main_bar_type is not None else None
-        )
-        stirrup_dia_mm = (
-            bar_type_diameter_mm(self.selection.stirrup_bar_type, internal_to_mm)
-            if self.selection.stirrup_bar_type is not None else None
-        )
+        top_bar_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_bar_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
+        stirrup_dia_mm = self._diameter_mm(self.selection.stirrup_bar_type)
         try:
             layers_top = ui_inputs.parse_optional_positive_int(
                 self.top_layers_tb.Text, "Number of top layers", max_value=MAX_LAYERS
@@ -807,22 +836,41 @@ class DetailBeamWindow(forms.WPFWindow):
 
         self._set_review_report(lines)
 
-    def _gather_report_geometry(self, b_mm, h_mm):
-        """Beam/support geometry the report needs, re-detected from
-        ``self.beam`` (the same helper functions ``_pick_beam_in_context``
-        already uses) rather than cached from pick time -- support width
-        and cover are never stored on ``self`` today; only their formatted
-        TextBlock strings are, which the report cannot recompute anything
-        from. Returns a dict with an ``"error"`` key on any failure,
-        instead of raising, so one bad read degrades to a report line
-        rather than losing the whole report.
+    def _detect_supports(self):
+        """Support detection for the picked beam: both ends' supporting
+        element, width, cover and the span between them. Computed ONCE per
+        pick and remembered.
+
+        Every part of this is expensive and none of it depends on the
+        inputs the engineer is editing. ``find_supporting_element`` is a
+        document-wide filtered scan, run once per end, followed by a host
+        validation and a cover read-back per support. It used to run again
+        in full for every Review report and again for Place -- three or
+        four identical scans per beam, and on a federated model that is
+        the most expensive thing this tool does.
+
+        Beam-scoped, and cleared by ``_reset_beam_state`` alongside
+        ``self.beam`` itself, so a re-pick re-detects from scratch (A35's
+        requirement that re-picking re-runs support detection).
+
+        A failed read is cached too, deliberately: these failures are
+        properties of the beam and its supports, not transient, so
+        retrying on every keystroke would produce the same message at the
+        cost of another scan. Re-picking clears it.
         """
+        if self._support_detection is not None:
+            return self._support_detection
+        self._support_detection = self._detect_supports_uncached()
+        return self._support_detection
+
+    def _detect_supports_uncached(self):
         beam = self.beam
         try:
             start_pt, end_pt = beam_endpoints(beam)
             axis = beam_axis_direction(beam)
         except Exception as ex:
-            return {"error": "Could not read beam geometry -- {}: {}".format(type(ex).__name__, ex)}
+            return {"error": "Could not read beam geometry -- {}: {}".format(
+                type(ex).__name__, ex)}
 
         support_start, support_width_start_mm = _end_support(doc, start_pt, axis, beam.Id)
         support_end, support_width_end_mm = _end_support(doc, end_pt, axis, beam.Id)
@@ -861,12 +909,6 @@ class DetailBeamWindow(forms.WPFWindow):
             "start_pt": start_pt,
             "end_pt": end_pt,
             "axis": axis,
-            "b_mm": b_mm, "h_mm": h_mm,
-            "cover_top_mm": self.beam_covers_mm.top_mm,
-            "cover_btm_mm": self.beam_covers_mm.bottom_mm,
-            "cover_side_mm": self.beam_covers_mm.side_mm,
-            "cover_end_start_mm": self.beam_covers_mm.end_start_mm,
-            "cover_end_end_mm": self.beam_covers_mm.end_end_mm,
             "is_supported_start": is_supported_start,
             "is_supported_end": is_supported_end,
             "support_width_start_mm": support_width_start_mm,
@@ -875,6 +917,31 @@ class DetailBeamWindow(forms.WPFWindow):
             "support_cover_end_mm": support_cover_end_mm,
             "l_mm": l_mm,
         }
+
+    def _gather_report_geometry(self, b_mm, h_mm):
+        """Beam/support geometry the report needs: the cached support
+        detection above, plus the b/h the engineer may have edited and the
+        beam's own covers (numbers already held on ``self``, not just the
+        formatted TextBlock strings, which nothing can recompute from).
+
+        Returns a dict with an ``"error"`` key on any failure, instead of
+        raising, so one bad read degrades to a report line rather than
+        losing the whole report.
+        """
+        detected = self._detect_supports()
+        if "error" in detected:
+            return detected
+
+        geometry = dict(detected)
+        geometry.update({
+            "b_mm": b_mm, "h_mm": h_mm,
+            "cover_top_mm": self.beam_covers_mm.top_mm,
+            "cover_btm_mm": self.beam_covers_mm.bottom_mm,
+            "cover_side_mm": self.beam_covers_mm.side_mm,
+            "cover_end_start_mm": self.beam_covers_mm.end_start_mm,
+            "cover_end_end_mm": self.beam_covers_mm.end_end_mm,
+        })
+        return geometry
 
     def _format_end_result(self, a_mm, b_mm):
         """Ported verbatim (wording) from "Place Main Bars.pushbutton"."""
@@ -898,7 +965,7 @@ class DetailBeamWindow(forms.WPFWindow):
                 "inset, even when this run does not also place stirrups."
             )
             return lines
-        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+        dia_stirrup_mm = self._diameter_mm(stirrup_bar_type)
         lines.append(
             "- " + role_grade_report_line(ROLE_STIRRUP, element_name(stirrup_bar_type))
             + " (positions the main bars; placed only if stirrups are also requested)"
@@ -916,14 +983,8 @@ class DetailBeamWindow(forms.WPFWindow):
             lines.append("- Cannot compute main bar layout: {}".format(ex))
             return lines
 
-        top_dia_mm = (
-            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
-            if self.selection.top_main_bar_type is not None else None
-        )
-        btm_dia_mm = (
-            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
-            if self.selection.bottom_main_bar_type is not None else None
-        )
+        top_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
 
         faces = (
             ("Top", ROLE_TOP_MAIN, review.top_main, self.selection.top_main_bar_type, top_dia_mm,
@@ -1095,7 +1156,7 @@ class DetailBeamWindow(forms.WPFWindow):
         if stirrup_bar_type is None:
             lines.append("- Cannot compute stirrup geometry: no stirrup RebarBarType selected.")
             return lines
-        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+        dia_stirrup_mm = self._diameter_mm(stirrup_bar_type)
         lines.append("- " + role_grade_report_line(ROLE_STIRRUP, element_name(stirrup_bar_type)))
 
         hook_type = self.selection.stirrup_hook_type
@@ -1192,17 +1253,17 @@ class DetailBeamWindow(forms.WPFWindow):
         """
         lines = ["", "Crack/skin bars (rev 2 section 5):"]
         crack_bar_type = self.selection.crack_bar_type
-        dia_crack_mm = bar_type_diameter_mm(crack_bar_type, internal_to_mm)
+        dia_crack_mm = self._diameter_mm(crack_bar_type)
         lines.append("- " + role_grade_report_line(ROLE_CRACK, element_name(crack_bar_type)))
 
         stirrup_bar_type = self.selection.stirrup_bar_type
         if stirrup_bar_type is None:
             lines.append("- Cannot compute crack-bar layout: no stirrup RebarBarType selected.")
             return lines
-        dia_stirrup_mm = bar_type_diameter_mm(stirrup_bar_type, internal_to_mm)
+        dia_stirrup_mm = self._diameter_mm(stirrup_bar_type)
 
-        top_dia_mm = bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
-        btm_dia_mm = bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
+        top_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
 
         try:
             spacer_dia_mm = ui_inputs.parse_positive_float(self.spacer_dia_tb.Text, "O_spacer")
@@ -1318,6 +1379,11 @@ class DetailBeamWindow(forms.WPFWindow):
         # and this method untouched. An anchor that is not unique is not
         # an anchor.
         self.geometry_mm = None
+        # The cached support detection is as beam-scoped as the beam:
+        # keeping the previous beam's supports would report and place
+        # against the wrong span, silently and plausibly, which is the
+        # worst way for a cache to be wrong.
+        self._support_detection = None
         self.beam_status_tb.Text = message
         self.warnings_tb.Text = ""
         self.l_tb.Text = ""
@@ -1555,20 +1621,29 @@ class DetailBeamWindow(forms.WPFWindow):
         """
         b_mm, h_mm = geometry["b_mm"], geometry["h_mm"]
         cover_side_mm = geometry["cover_side_mm"]
-        stirrup_dia_mm = bar_type_diameter_mm(
-            self.selection.stirrup_bar_type, internal_to_mm
-        )
+        stirrup_dia_mm = self._diameter_mm(self.selection.stirrup_bar_type)
         spacer_dia_mm = ui_inputs.parse_positive_float(
             self.spacer_dia_tb.Text, "O_spacer"
         )
-        top_dia_mm = (
-            bar_type_diameter_mm(self.selection.top_main_bar_type, internal_to_mm)
-            if self.selection.top_main_bar_type is not None else None
-        )
-        btm_dia_mm = (
-            bar_type_diameter_mm(self.selection.bottom_main_bar_type, internal_to_mm)
-            if self.selection.bottom_main_bar_type is not None else None
-        )
+        top_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
+
+        # Parsed ONCE, here, rather than inside the per-face closure: the
+        # crack plan needs the LAYER counts (and only those) for faces it
+        # may not be placing, so they cannot be a detail private to a
+        # face that is being placed.
+        counts = {}
+        layer_counts = {}
+        for is_top in (True, False):
+            label = "Top" if is_top else "Bottom"
+            counts[is_top] = ui_inputs.parse_optional_positive_int(
+                (self.top_bar_count_tb if is_top else self.bottom_bar_count_tb).Text,
+                "{} bar count".format(label),
+            )
+            layer_counts[is_top] = ui_inputs.parse_optional_positive_int(
+                (self.top_layers_tb if is_top else self.bottom_layers_tb).Text,
+                "{} layer count".format(label), max_value=MAX_LAYERS,
+            )
 
         def _face(is_top):
             # A51: the OPPOSITE face's diameter comes from its SELECTED
@@ -1577,22 +1652,14 @@ class DetailBeamWindow(forms.WPFWindow):
             # rather than invent a diameter (A42).
             dia_own = top_dia_mm if is_top else btm_dia_mm
             dia_other = btm_dia_mm if is_top else top_dia_mm
-            count_tb = self.top_bar_count_tb if is_top else self.bottom_bar_count_tb
-            layers_tb = self.top_layers_tb if is_top else self.bottom_layers_tb
-            label = "Top" if is_top else "Bottom"
             return core_plan.face_plan(
                 is_top, h_mm, b_mm,
                 geometry["cover_top_mm"] if is_top else geometry["cover_btm_mm"],
                 cover_side_mm,
                 geometry["cover_end_start_mm"],
                 stirrup_dia_mm, dia_own, dia_other, spacer_dia_mm,
-                ui_inputs.parse_optional_positive_int(
-                    count_tb.Text, "{} bar count".format(label)
-                ),
-                ui_inputs.parse_optional_positive_int(
-                    layers_tb.Text, "{} layer count".format(label),
-                    max_value=MAX_LAYERS,
-                ),
+                counts[is_top],
+                layer_counts[is_top],
                 ui_inputs.parse_positive_float(
                     (self.ld_top_mult_tb if is_top else self.ld_btm_mult_tb).Text,
                     "LD_{} multiplier".format("top" if is_top else "btm"),
@@ -1633,14 +1700,38 @@ class DetailBeamWindow(forms.WPFWindow):
 
         crack = None
         if review.crack_bars.requested:
-            # A26/A50: measured to the INNERMOST layer of each face, which
-            # is the LAST plan layer, never the first. Both faces exist
-            # here by construction -- A50 is what makes that true.
+            # A26/A50: measured to the INNERMOST layer of each face.
+            #
+            # This asks core_plan for that ONE offset per face rather than
+            # building a whole FacePlan and reading its last layer, which
+            # is what it used to do -- twice over, for faces it had
+            # already built above. That was not just duplicate work: a
+            # FacePlan needs a per-layer BAR count, and A50 only requires
+            # a face to be DETAILED (bar type + layer count). Detail both
+            # faces, place only one, request crack bars, and the second
+            # build raised a TypeError from inside the bar-position
+            # arithmetic with the transaction already open. H_avail never
+            # needed a bar count.
+            if (top_dia_mm is None or btm_dia_mm is None
+                    or layer_counts[True] is None or layer_counts[False] is None):
+                raise ValueError(
+                    "Crack bars cannot be placed: section 5.1's H_avail is "
+                    "measured to the innermost main-bar layer of BOTH "
+                    "faces, so each face needs a bar type AND a layer "
+                    "count (A50). The Review tab names whichever is "
+                    "still missing."
+                )
             crack = core_plan.crack_plan(
                 h_mm, b_mm, cover_side_mm, stirrup_dia_mm,
-                bar_type_diameter_mm(self.selection.crack_bar_type, internal_to_mm),
-                _face(True).layers[-1].offset_mm,
-                _face(False).layers[-1].offset_mm,
+                self._diameter_mm(self.selection.crack_bar_type),
+                core_plan.innermost_layer_offset_mm(
+                    geometry["cover_top_mm"], stirrup_dia_mm, top_dia_mm,
+                    spacer_dia_mm, layer_counts[True],
+                ),
+                core_plan.innermost_layer_offset_mm(
+                    geometry["cover_btm_mm"], stirrup_dia_mm, btm_dia_mm,
+                    spacer_dia_mm, layer_counts[False],
+                ),
                 ui_inputs.parse_positive_float(self.crack_s_max_tb.Text, "s_max"),
             )
 
