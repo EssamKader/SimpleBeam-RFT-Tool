@@ -38,6 +38,8 @@ XAML = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
         "Detail Beam.panel/Detail Beam.pushbutton/DetailBeamWindow.xaml")
 PLAN = "RFTBeamDetailing.extension/lib/rft/core/plan.py"
 REPORT = "RFTBeamDetailing.extension/lib/rft/ui/report.py"
+GUARDS = "RFTBeamDetailing.extension/lib/rft/core/guards.py"
+SPACING = "RFTBeamDetailing.extension/lib/rft/core/spacing.py"
 T = "tests/test_detail_beam_xaml.py::"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
@@ -141,6 +143,22 @@ CASES = [
      '    "zone2": (False, False),\n    "zone3": (True, True),\n}',
      "tests/test_core_plan.py::test_only_one_module_defines_the_zone_layout_flags",
      "a second copy of the flags, with the right values (today)"),
+
+    # #45. The text check is the one that catches the FOURTEENTH guard --
+    # the per-guard table cannot, since a new guard would not be in it.
+    (SPACING, "\n                message=message, severity=SEVERITY_BLOCKING,",
+     "\n                message=message,",
+     "tests/test_guard_severity.py::"
+     "test_every_guardmessage_construction_site_in_the_library_declares_one",
+     "a guard built without declaring whether it blocks"),
+
+    # And a severity that is declared but WRONG -- downgrading a refusal
+    # to a warning, which is the direction that matters.
+    (GUARDS, 'message=message, severity=SEVERITY_BLOCKING,\n    )\n\n\ndef free_end_guard_message',
+     'message=message, severity=SEVERITY_WARNING,\n    )\n\n\ndef free_end_guard_message',
+     "tests/test_guard_severity.py::"
+     "test_each_guard_declares_the_severity_v0_1_0_actually_had",
+     "a refusal quietly downgraded to a warning"),
 ]
 
 
