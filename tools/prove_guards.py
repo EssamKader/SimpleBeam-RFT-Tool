@@ -299,6 +299,20 @@ CASES = [
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the spacing gate alerting but not returning, so Place proceeds anyway"),
 
+    # This is the hole-A case from round 2, adapted rather than dropped:
+    # the ENCLOSING `if` it used to target (`if "error" not in geometry:`)
+    # no longer exists, but the same short-circuit-by-constant shape now
+    # applies to the geometry-error check itself, which precedes the
+    # preflight instead of enclosing it.
+    (SCRIPT, "        # statement is a decidable, total check instead: it always runs.\n"
+             "        geometry = self._gather_report_geometry(b_mm, h_mm)\n"
+             '        if "error" in geometry:',
+     "        # statement is a decidable, total check instead: it always runs.\n"
+     "        geometry = self._gather_report_geometry(b_mm, h_mm)\n"
+     '        if False and "error" in geometry:',
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the geometry-error check short-circuited by a constant"),
+
     # Round 3's own review: the preceding geometry-error check inverted,
     # so the spacing preflight only ever runs when geometry has ALREADY
     # failed to read -- i.e. never in the normal case. No constant
