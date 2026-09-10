@@ -38,6 +38,14 @@
 
         <SolidColorBrush x:Key="WarningAmber" Color="#FFB05A00"/>
         <SolidColorBrush x:Key="DangerRed" Color="#FFB00000"/>
+        <!-- #49 (U5): the live sketch's ONLY "complies" colour. None of
+             the ten brushes above is green, and the notation SVG
+             (docs/ui/sketch-notation.svg) uses green specifically for a
+             passing dimension and for crack/skin bars: see
+             rft.ui.sketch_palette, which is the one place a style key is
+             mapped to a brush NAME (never a WPF object) so the mapping
+             itself is testable under plain CPython. -->
+        <SolidColorBrush x:Key="PassGreen" Color="#FF2E7D32"/>
 
         <!-- The selected tab. WPF's default TabItem template paints its own
              selected background and IGNORES Background entirely, so this
@@ -306,42 +314,18 @@
                             <TextBox x:Name="ld_btm_mult_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text=""/>
                         </Grid>
 
-                        <!-- #51: teaching diagram for this tab. Static and schematic; it names parts and states no size. -->
-                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Left">
+                        <!-- #49 (U5): the LIVE cross-section sketch, replacing #51's
+ static teaching diagram (that diagram's own comment said "Real
+ numbers belong to #49's live sketch"). Every shape on this
+ Canvas is drawn by script.py's renderer from a plain list of
+ rft.ui.sketch namedtuples, no arithmetic in script.py itself
+ (A48). ClipToBounds so a beam wider than the pane never spills
+ past the Border; SizeChanged triggers a rescale, not a
+ recompute (the numbers do not change, only cx/cy/s do). -->
+                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas Width="430" Height="232">
-                                    <!-- Concrete section, seen end on. Proportions are schematic: this drawing names the parts and states no size. -->
-                                    <Rectangle Canvas.Left="26" Canvas.Top="16" Width="118" Height="196" Fill="{StaticResource SurfaceWhite}" Stroke="{StaticResource InkPrimary}" StrokeThickness="1.4"/>
-                                    <Rectangle Canvas.Left="35" Canvas.Top="25" Width="100" Height="178" Fill="{StaticResource SurfaceTint}" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.2"/>
-                                    <TextBlock Canvas.Left="40" Canvas.Top="208" FontSize="10" Foreground="{StaticResource InkMuted}" Text="stirrup"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="36.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="60.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="184.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="160.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="36.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="60.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="184.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="160.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="36.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="60.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="184.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="160.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Line X1="144" Y1="40" X2="178" Y2="34" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="182" Canvas.Top="22" FontSize="11" Foreground="{StaticResource InkPrimary}" FontWeight="Bold" Text="TOP FACE, layer 1"/>
-                                    <TextBlock Canvas.Left="182" Canvas.Top="37" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="Layer 1 is always the layer nearest the face."/>
-                                    <Line X1="144" Y1="64" X2="178" Y2="88" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="182" Canvas.Top="82" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="layer 2, and so on inwards"/>
-                                    <Line X1="158" Y1="40" X2="158" Y2="64" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.2"/>
-                                    <Polygon Points="158,40 155,46 161,46" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Polygon Points="158,64 155,58 161,58" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <TextBlock Canvas.Left="166" Canvas.Top="44.0" FontSize="10" Foreground="{StaticResource InkMuted}" Text="clear gap"/>
-                                    <Line X1="85" Y1="34" X2="150" Y2="112" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="154" Canvas.Top="104" FontSize="11" Foreground="{StaticResource InkMuted}" Width="242" TextWrapping="Wrap" Text="Bars per layer counts ONE row: three here, whatever the number of layers."/>
-                                    <Line X1="144" Y1="188" X2="178" Y2="194" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="182" Canvas.Top="190" FontSize="11" Foreground="{StaticResource InkPrimary}" FontWeight="Bold" Text="BOTTOM FACE, layer 1"/>
-                                    <TextBlock Canvas.Left="182" Canvas.Top="205" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="Counted the same way, from the bottom face inwards."/>
-                                </Canvas>
-                                <TextBlock Margin="0,8,0,0" Width="430" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Schematic: it names the parts and states no dimension. The tool derives every offset and position from the beam and the bar types you select."/>
+                                <Canvas x:Name="main_bars_sketch_canvas" Height="260" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Live cross-section: every dimension comes from rft.core (A48). Stirrup stations and hook fillets elsewhere in this tool are schematic; this section view has neither, see the Stirrups tab."/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -379,57 +363,16 @@
                     <TextBlock x:Name="closure_type3_note_tb" Foreground="{StaticResource WarningAmber}"
                                TextWrapping="Wrap" Margin="0,0,0,0" Text=""/>
 
-                        <!-- #51: teaching diagram for this tab. Static and schematic; it names parts and states no size. -->
-                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Left">
+                        <!-- #49 (U5): the LIVE longitudinal elevation, replacing #51's
+ static teaching diagram, shown while THIS tab is active (A47).
+ Individual stirrup stations are drawn SCHEMATIC (evenly spaced
+ ticks, style "schematic"): the count and spacing are exact
+ (rft.core.plan.StirrupPlan), the STATIONS are Revit's rebar
+ set's own layout and are never predicted here (A48/A49). -->
+                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas Width="610" Height="168">
-                                    <!-- Longitudinal elevation. Tick spacing is illustrative, not computed: the tool decides the zone lengths and counts. -->
-                                    <Rectangle Canvas.Left="46" Canvas.Top="26" Width="516" Height="58" Fill="{StaticResource SurfaceWhite}" Stroke="{StaticResource InkPrimary}" StrokeThickness="1.4"/>
-                                    <Rectangle Canvas.Left="14" Canvas.Top="84" Width="46" Height="34" Fill="{StaticResource SurfaceDisabled}" Stroke="{StaticResource InkMuted}" StrokeThickness="1"/>
-                                    <Rectangle Canvas.Left="548" Canvas.Top="84" Width="46" Height="34" Fill="{StaticResource SurfaceDisabled}" Stroke="{StaticResource InkMuted}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="16" Canvas.Top="94" FontSize="10" Foreground="{StaticResource InkMuted}" Text="support"/>
-                                    <TextBlock Canvas.Left="552" Canvas.Top="94" FontSize="10" Foreground="{StaticResource InkMuted}" Text="support"/>
-                                    <Line X1="54" Y1="30" X2="54" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="68" Y1="30" X2="68" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="82" Y1="30" X2="82" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="96" Y1="30" X2="96" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="110" Y1="30" X2="110" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="124" Y1="30" X2="124" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="138" Y1="30" X2="138" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="152" Y1="30" X2="152" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="166" Y1="30" X2="166" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="192" Y1="30" X2="192" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="220" Y1="30" X2="220" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="248" Y1="30" X2="248" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="276" Y1="30" X2="276" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="304" Y1="30" X2="304" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="332" Y1="30" X2="332" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="360" Y1="30" X2="360" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="388" Y1="30" X2="388" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="416" Y1="30" X2="416" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="434" Y1="30" X2="434" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="448" Y1="30" X2="448" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="462" Y1="30" X2="462" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="476" Y1="30" X2="476" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="490" Y1="30" X2="490" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="504" Y1="30" X2="504" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="518" Y1="30" X2="518" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="532" Y1="30" X2="532" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="546" Y1="30" X2="546" Y2="80" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.6"/>
-                                    <Line X1="54" Y1="130" X2="166" Y2="130" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="54" Y1="126" X2="54" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="166" Y1="126" X2="166" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <TextBlock Canvas.Left="52.0" Canvas.Top="136" FontSize="10" Foreground="{StaticResource InkMuted}" Width="120" TextWrapping="Wrap" Text="dense, near the support"/>
-                                    <Line X1="192" Y1="130" X2="416" Y2="130" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="192" Y1="126" X2="192" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="416" Y1="126" X2="416" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <TextBlock Canvas.Left="246.0" Canvas.Top="136" FontSize="10" Foreground="{StaticResource InkMuted}" Width="120" TextWrapping="Wrap" Text="normal, at midspan"/>
-                                    <Line X1="434" Y1="130" X2="546" Y2="130" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="434" Y1="126" X2="434" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <Line X1="546" Y1="126" X2="546" Y2="134" Stroke="{StaticResource InkMuted}" StrokeThickness="1.2"/>
-                                    <TextBlock Canvas.Left="432.0" Canvas.Top="136" FontSize="10" Foreground="{StaticResource InkMuted}" Width="120" TextWrapping="Wrap" Text="dense, near the support"/>
-                                </Canvas>
-                                <TextBlock Margin="0,8,0,0" Width="610" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Two spacings, three zones: dense near each support where shear is highest, normal through midspan. You give the two spacings; the tool works out where each zone starts and ends and how many stirrups fit."/>
+                                <Canvas x:Name="stirrups_sketch_canvas" Height="220" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Live elevation: zone boundaries, counts and spacing are exact (rft.core); individual stirrup stations and hook bend arcs are drawn schematic, labelled so on the drawing, because Revit's own rebar set and bar type own that geometry (A48/A49)."/>
                             </StackPanel>
                         </Border>
                 </StackPanel>
@@ -456,37 +399,15 @@
                     <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" Style="{StaticResource SectionHeading}" Margin="0,0,0,2" TextWrapping="Wrap"/>
                     <TextBlock x:Name="h_avail_tb" TextWrapping="Wrap" Text=""/>
 
-                        <!-- #51: teaching diagram for this tab. Static and schematic; it names parts and states no size. -->
-                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Left">
+                        <!-- #49 (U5): the LIVE cross-section sketch (A47: section while
+ this tab is active, same as Main bars), replacing #51's static
+ teaching diagram. Crack bars, H_avail and both faces' innermost
+ layer are all drawn to scale from the same CrackPlan/LayerPlan
+ objects the Review report and the placer use (A48/#56). -->
+                        <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas Width="430" Height="250">
-                                    <!-- H_avail is the span BETWEEN the innermost main-bar layers, which is why both faces must be detailed before it exists. -->
-                                    <Rectangle Canvas.Left="26" Canvas.Top="16" Width="118" Height="214" Fill="{StaticResource SurfaceWhite}" Stroke="{StaticResource InkPrimary}" StrokeThickness="1.4"/>
-                                    <Rectangle Canvas.Left="35" Canvas.Top="25" Width="100" Height="196" Fill="{StaticResource SurfaceTint}" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.2"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="42.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="44.5" Canvas.Top="196.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="42.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="81.5" Canvas.Top="196.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="42.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="118.5" Canvas.Top="196.5" Width="7.0" Height="7.0" Fill="{StaticResource InkPrimary}"/>
-                                    <Ellipse Canvas.Left="41" Canvas.Top="89" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Ellipse Canvas.Left="123" Canvas.Top="89" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Ellipse Canvas.Left="41" Canvas.Top="135" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Ellipse Canvas.Left="123" Canvas.Top="135" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Ellipse Canvas.Left="41" Canvas.Top="181" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Ellipse Canvas.Left="123" Canvas.Top="181" Width="6" Height="6" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Line X1="160" Y1="46" X2="160" Y2="200" Stroke="{StaticResource SkyBlueDeep}" StrokeThickness="1.2"/>
-                                    <Polygon Points="160,46 157,52 163,52" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <Polygon Points="160,200 157,194 163,194" Fill="{StaticResource SkyBlueDeep}"/>
-                                    <TextBlock Canvas.Left="168" Canvas.Top="114.0" FontSize="11" Foreground="{StaticResource InkPrimary}" FontWeight="Bold" Text="H_avail"/>
-                                    <Line X1="144" Y1="46" X2="176" Y2="42" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="180" Canvas.Top="30" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="innermost TOP main-bar layer"/>
-                                    <Line X1="144" Y1="200" X2="176" Y2="204" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="180" Canvas.Top="202" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="innermost BOTTOM main-bar layer"/>
-                                    <Line X1="126" Y1="138" X2="176" Y2="138" Stroke="{StaticResource BorderSubtle}" StrokeThickness="1"/>
-                                    <TextBlock Canvas.Left="180" Canvas.Top="130" FontSize="11" Foreground="{StaticResource InkMuted}" Width="214" TextWrapping="Wrap" Text="crack / skin bars, one each side per layer"/>
-                                </Canvas>
-                                <TextBlock Margin="0,8,0,0" Width="430" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="H_avail is measured between the innermost main-bar layers, not between the concrete faces. That is why both faces need a bar type and a layer count before crack bars can be planned."/>
+                                <Canvas x:Name="crack_bars_sketch_canvas" Height="260" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="H_avail is measured between the innermost main-bar layers, not between the concrete faces (A26) -- both faces need a bar type and a layer count before crack bars, or this drawing, can show anything here."/>
                             </StackPanel>
                         </Border>
                 </StackPanel>
