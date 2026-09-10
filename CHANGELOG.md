@@ -10,6 +10,13 @@ to load. Only a tagged commit should be loaded into a Revit session, never
 by the project owner. It is `v0.3.0-rc4`'s tree: the live sketch, readable
 labels, the `RFT-Tools` ribbon, and per-project persistence.
 
+**`v0.3.1-rc1` is a CANDIDATE on top of it**, and a structural one: the
+library moved to `RFT.lib` so a second element can import it (#64).
+Nothing about the tool behaves differently -- but how pyRevit FINDS the
+library changed, which the test suite cannot verify. Read its install
+note before loading it; registering it beside `v0.3.0` is the one way to
+break it.
+
 **`v0.2.1` is the previous verified release.** Go back to it only if
 `v0.3.0` misbehaves.
 The single `Detail Beam` window opens, picks a beam, reports its plan and
@@ -72,6 +79,138 @@ shared one. Both properties are guarded by
 
 As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.1-rc1] — 2026-09-10
+
+**A CANDIDATE, and a structural one.** No behaviour changed, no dimension
+changed, no window changed. What changed is **where the library lives**,
+which means how pyRevit FINDS it — and that is the one thing this
+project's test suite structurally cannot verify, because
+`tests/conftest.py` puts the package on `sys.path` itself. A green suite
+proves the code is correct; it says nothing about whether Revit can
+import it.
+
+That is the whole reason this is its own tag rather than part of a larger
+release: if the beam tool fails to load, the cause is unambiguous.
+
+Closes #64.
+
+### What moved
+
+```
+before:  SimpleBeamRFT.extension/lib/rft/...
+after:   RFT.lib/rft/...
+```
+
+`RFT.lib` is a pyRevit **library extension**. pyRevit puts a UI
+extension's own `lib/` on that extension's module path ONLY, so while
+`rft` lived inside `SimpleBeamRFT.extension`, no other extension could
+import it — the shared code was real and unreachable. A folder whose name
+ends in `.lib` is different: `get_installed_ui_extensions` collects every
+one under the registered search roots and adds it to the module path of
+**every** UI extension.
+
+```python
+# pyrevitlib/pyrevit/extensions/extensionmgr.py
+def _update_extension_search_paths(ui_ext, lib_ext_list, pyrvt_paths):
+    for lib_ext in lib_ext_list:
+        ui_ext.add_module_path(lib_ext.directory)
+```
+
+A future `ColumnRFT.extension` can now `import rft.core.spacing`. Which
+modules it SHOULD import, and which encode the beam case and must not be
+reused, is audited per module in `docs/reuse-for-new-elements.md`.
+
+### Three things that fail silently, now guarded
+
+`tests/test_library_extension_layout.py`. Each of these leaves the beam
+tool working on this machine while a second element imports nothing,
+which is why none of them can be left to be noticed:
+
+1. **The `.lib` suffix is load-bearing.** `LibraryExtension.matches` is a
+   suffix test on the folder name. `RFT-lib` is an ordinary folder pyRevit
+   says nothing about.
+2. **The package sits at `RFT.lib/rft`, never `RFT.lib/lib/rft`.** The
+   path added is the `.lib` folder itself. A `lib/` level inside it is the
+   intuitive layout — it mirrors a UI extension — and it breaks the
+   import.
+3. **No UI extension may hold its own `rft` copy.** pyRevit's own comment:
+   paths internal to an extension "will take precedence over paths added
+   by this method." A leftover copy WINS over `RFT.lib`, invisibly, and
+   the shadowing copy is the one that drifts. The guard looks for an `rft`
+   package anywhere under the UI extension, not just under `lib/`.
+
+All four assertions in that file were shown to fail against a wrong
+layout before being trusted — the shadow one against a real shadowing
+copy created on disk, the others against injected roots.
+
+### The move would have silently narrowed a whole test module
+
+`tests/test_ironpython_compat.py` walked `SimpleBeamRFT.extension` for
+`.py` files. That is the module enforcing the IronPython 2.7 constraints
+— the PEP 263 cookie, no f-strings, no Python-3-only stdlib — and after
+the move that walk would have covered **five files instead of thirty-one**
+while every test stayed green.
+
+It now walks both extensions and asserts that **each root contributes**,
+not merely that the total is non-empty: the library holds all but a
+handful of the modules, so a total-only count would still pass with the
+pushbutton bundle contributing nothing.
+
+### A guard that was blind in one direction
+
+The CI-path guard added after `v0.3.0` asks "does everything CI names
+exist". It cannot catch `RFT.lib` becoming `RFTlib`: the mutated token
+stops looking like a path and is skipped. The prover reported MISSED on
+exactly that mutation.
+
+Guessing which tokens are paths was the wrong question. The guard now
+also asks the opposite, discovered from the filesystem: every `.lib` and
+`.extension` bundle that EXISTS must be named by some CI command. A
+mistyped path then leaves the real folder unmentioned. It also means a
+second element's extension cannot land in the repo without being added to
+CI.
+
+490 tests, 31 of 31 guards proven.
+
+### Installing this one — READ THIS
+
+The registered search path does not change in principle: `RFT.lib` and
+`SimpleBeamRFT.extension` are siblings at the repo root, which is already
+what gets registered. But the project's install procedure uses **one
+worktree per tag**, so registering this candidate means registering a new
+path — and a new hazard comes with it.
+
+**Forget the old path before adding the new one.**
+
+```
+pyrevit extensions paths forget "<somewhere>/rft-v0.3.0"
+git worktree add <somewhere>/rft-v0.3.1-rc1 v0.3.1-rc1
+pyrevit extensions paths add <somewhere>/rft-v0.3.1-rc1
+```
+
+With both registered, pyRevit sees **two** UI extensions and, worse, the
+`v0.3.0` worktree still carries `SimpleBeamRFT.extension/lib/rft` — which
+takes PRECEDENCE for its own extension, while whichever `RFT.lib` comes
+first wins for the other. That is the exact shadowing failure the new
+guards exist to prevent, and it cannot be guarded from inside the repo
+because it is a property of what is registered on the machine.
+
+**What to check:** the tab appears, the button opens the window, and a
+beam details end to end as it did on `v0.3.0`. If the tab appears but
+every click raises `ImportError: No module named rft`, `RFT.lib` is not
+under the registered path.
+
+### Still open
+
+Unchanged by this candidate: **#61** (Place does not refuse on a section
+6.2-6.4 spacing violation) and **#63** (spacer bars are never modelled).
+Where the shared library is VERSIONED once a second element exists —
+monorepo, its own repo, or duplicated — is still undecided; #64 left it in
+this repo by default rather than by decision. See
+`docs/reuse-for-new-elements.md` section 2.
+
+---
 
 ## [v0.3.0] — 2026-09-10
 
