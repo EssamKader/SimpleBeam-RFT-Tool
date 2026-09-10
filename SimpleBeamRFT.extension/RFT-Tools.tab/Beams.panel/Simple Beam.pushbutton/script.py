@@ -74,13 +74,17 @@ from rft.core.crack_bars import (
     crack_bar_end_result,
     crack_reinforcement_triggered,
 )
-from rft.core.guards import stirrup_type3_guard_message
+from rft.core.guards import GuardMessage, SEVERITY_BLOCKING, is_blocking, stirrup_type3_guard_message
 from rft.core.layout import (
     MAX_LAYERS,
     layer_offset_mm,
     spacer_length_mm,
 )
-from rft.core.spacing import governing_min_spacing_mm, validate_layer_spacing
+from rft.core.spacing import (
+    SPACING_SPEC_SECTION,
+    governing_min_spacing_mm,
+    validate_layer_spacing,
+)
 from rft.core.grades import (
     ROLE_BOTTOM_MAIN,
     ROLE_CRACK,
@@ -2322,6 +2326,105 @@ class SimpleBeamWindow(forms.WPFWindow):
 
         return missing
 
+    def _spacing_refusal_messages(self, review, geometry):
+        """The section 6.2-6.4 preflight (#61) -- REFUSES before the
+        transaction opens rather than after, for the two guards the
+        Review report already computed and Place never consulted: A43/
+        A44's sub-minimum achieved clear spacing, and A36's section 6.3
+        option 1 selected together with more than one layer.
+
+        Consults ``rft.core.plan.face_spacing_check_mm`` -- the SAME
+        computation ``rft.ui.report`` formats -- rather than re-deriving
+        `validate_face_spacing`'s arguments a second time here. Checks
+        only REQUESTED faces (``review.top_main``/``review.bottom_main``),
+        both independently: one face's messages never suppress the
+        other's. Filtered with ``guards.is_blocking`` -- never on which
+        function produced the guard, never on its message text (issue
+        #45's severity, its first consumer on the placement path).
+        """
+        messages = []
+        try:
+            d_agg_mm = ui_inputs.parse_optional_positive_float(self.d_agg_tb.Text, "D_agg")
+            min_spacing_override_mm = ui_inputs.parse_optional_positive_float(
+                self.min_spacing_override_tb.Text, "min-spacing override"
+            )
+        except ValueError as ex:
+            return [GuardMessage(
+                condition="section 6.2 governing-spacing inputs could not be parsed",
+                spec_section=SPACING_SPEC_SECTION,
+                message="Cannot check section 6.2-6.4 spacing: {}".format(ex),
+                severity=SEVERITY_BLOCKING,
+            )]
+
+        stirrup_dia_mm = self._diameter_mm(self.selection.stirrup_bar_type)
+        faces = (
+            ("Top", review.top_main, self.top_face_option_combo,
+             self.top_bar_count_tb, self.top_layers_tb,
+             self._diameter_mm(self.selection.top_main_bar_type)),
+            ("Bottom", review.bottom_main, self.bottom_face_option_combo,
+             self.bottom_bar_count_tb, self.bottom_layers_tb,
+             self._diameter_mm(self.selection.bottom_main_bar_type)),
+        )
+        for (face_label, face_derivation, option_combo, count_tb, layers_tb,
+             dia_own_mm) in faces:
+            if not face_derivation.requested:
+                continue
+
+            # A36: an unselected section 6.3 option means the check CANNOT
+            # run -- "could not check" is not "passed", so this REFUSES by
+            # name rather than defaulting to option 2 (the same class of
+            # silent resolution A44 forbids for spacing violations).
+            option = ui_inputs.face_option_from_label(option_combo.SelectedItem)
+            if option is None:
+                messages.append(GuardMessage(
+                    condition="{} face: no section 6.3 option selected".format(face_label),
+                    spec_section=SPACING_SPEC_SECTION,
+                    message=(
+                        "{} face: REFUSED -- rev 2 section 6.3's per-face "
+                        "option (A36) is not selected, so the section "
+                        "6.2-6.4 spacing check cannot run. Select option 1 "
+                        "or 2 for this face before placing.".format(face_label)
+                    ),
+                    severity=SEVERITY_BLOCKING,
+                ))
+                continue
+
+            try:
+                count = ui_inputs.parse_optional_positive_int(
+                    count_tb.Text, "{} bar count per layer".format(face_label)
+                )
+                layers = ui_inputs.parse_optional_positive_int(
+                    layers_tb.Text, "Number of {} layers".format(face_label.lower()),
+                    max_value=MAX_LAYERS,
+                )
+            except ValueError as ex:
+                messages.append(GuardMessage(
+                    condition="{} face: spacing inputs could not be parsed".format(face_label),
+                    spec_section=SPACING_SPEC_SECTION,
+                    message="{} face: REFUSED -- cannot check section 6.2-6.4 "
+                            "spacing: {}".format(face_label, ex),
+                    severity=SEVERITY_BLOCKING,
+                ))
+                continue
+            if count is None or layers is None:
+                messages.append(GuardMessage(
+                    condition="{} face: bar count/layers missing".format(face_label),
+                    spec_section=SPACING_SPEC_SECTION,
+                    message="{} face: REFUSED -- cannot check section 6.2-6.4 "
+                            "spacing: missing count/layers.".format(face_label),
+                    severity=SEVERITY_BLOCKING,
+                ))
+                continue
+
+            check = core_plan.face_spacing_check_mm(
+                "{} face".format(face_label), option, count, layers,
+                geometry["b_mm"], geometry["cover_side_mm"], stirrup_dia_mm,
+                dia_own_mm, d_agg_mm, min_spacing_override_mm,
+            )
+            messages += [g for g in check.report.guard_messages if is_blocking(g)]
+
+        return messages
+
     def on_place_click(self, sender, args):
         """WPF click handler. Input validation is pure Python and stays
         here; everything that touches Revit is dispatched (#57)."""
@@ -2349,15 +2452,29 @@ class SimpleBeamWindow(forms.WPFWindow):
         # This ticket's structural requirement: Place refuses by name,
         # from the SAME attribute the pickers set -- no second collector
         # call, no defaulting to "first found" (A42).
-        missing = self._missing_bar_type_and_hook_messages(
-            self._compute_review_derivation()
-        )
+        review = self._compute_review_derivation()
+        missing = self._missing_bar_type_and_hook_messages(review)
         if missing:
             forms.alert(
                 "\n\n".join(m.message for m in missing),
                 title="Bar type / hook selection required",
             )
             return
+
+        # #61 -- the report's REFUSED (section 6.2-6.4) lines were never
+        # consulted here, so a face the Review tab said would fail was
+        # placed anyway. Geometry gathered the same way the Review tab
+        # gathers it (cached support detection, no Revit call), so this
+        # runs entirely before any transaction opens.
+        geometry = self._gather_report_geometry(b_mm, h_mm)
+        if "error" not in geometry:
+            spacing_messages = self._spacing_refusal_messages(review, geometry)
+            if spacing_messages:
+                forms.alert(
+                    "\n\n".join(m.message for m in spacing_messages),
+                    title="Section 6.2-6.4 spacing violation",
+                )
+                return
 
         # A Transaction started from a modeless window's handler fails
         # exactly the way the pick did, so it goes through the same

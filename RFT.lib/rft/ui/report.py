@@ -51,7 +51,7 @@ from rft.core.layout import (
     MAX_LAYERS,
     spacer_diameter_warning,
 )
-from rft.core.spacing import governing_min_spacing_mm, validate_face_spacing
+from rft.core.spacing import governing_min_spacing_mm
 from rft.core.stirrups import (
     centreline_leg_dimensions_mm,
 )
@@ -198,11 +198,17 @@ def _one_main_face_lines(face_label, dia_own_mm, dia_other_mm, count_text,
         lines.append("  - Cannot compute {} face layout: no section 6.3 option selected.".format(face_label.lower()))
         return lines
 
-    governing_min_mm = governing_min_spacing_mm(dia_own_mm, d_agg_mm, min_spacing_override_mm)
-    spacing_report = validate_face_spacing(
-        "{} face".format(face_label), option, [count] * layers, geometry["b_mm"],
-        geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm, governing_min_mm,
+    # #61 -- the ONE section 6.2-6.4 computation, shared with the
+    # placement preflight (`rft.core.plan.face_spacing_check_mm`). See
+    # that function's docstring for why a second derivation here was the
+    # defect, not a shortcut.
+    spacing_check = core_plan.face_spacing_check_mm(
+        "{} face".format(face_label), option, count, layers, geometry["b_mm"],
+        geometry["cover_side_mm"], dia_stirrup_mm, dia_own_mm, d_agg_mm,
+        min_spacing_override_mm,
     )
+    governing_min_mm = spacing_check.governing_min_mm
+    spacing_report = spacing_check.report
     lines.append("  - section 6.2 governing min_spacing = {:.1f} mm".format(governing_min_mm))
     for r in spacing_report.layer_results:
         lines.append(

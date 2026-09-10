@@ -426,3 +426,95 @@ def test_only_one_module_defines_the_zone_layout_flags():
         "module whose docstring carries the R4 de-duplication reasoning. "
         "Defined in: %s" % definers
     )
+
+
+# --- #61: face_spacing_check_mm, the ONE section 6.2-6.4 computation -------
+
+
+def test_face_spacing_check_mm_matches_calling_the_two_steps_by_hand():
+    """The whole point of this function: it is `governing_min_spacing_mm`
+    then `validate_face_spacing`, not a third derivation of either. Proven
+    by agreement with calling both directly, on a passing configuration.
+    """
+    from rft.core.spacing import governing_min_spacing_mm, validate_face_spacing
+
+    check = plan.face_spacing_check_mm(
+        "Bottom face", 2, 3, 2, B_MM, COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM,
+        20.0, None,
+    )
+    expected_governing_min_mm = governing_min_spacing_mm(BAR_DIA_MM, 20.0, None)
+    expected_report = validate_face_spacing(
+        "Bottom face", 2, [3, 3], B_MM, COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM,
+        expected_governing_min_mm,
+    )
+    assert check.governing_min_mm == expected_governing_min_mm
+    assert check.report == expected_report
+
+
+def test_face_spacing_check_mm_refuses_option_1_with_more_than_one_layer():
+    """A36: option 1 ('single wide row') selected together with more than
+    one layer is a contradiction, refused outright by
+    `validate_face_spacing` -- never silently resolved as option 2.
+    """
+    from rft.core.spacing import OPTION_SINGLE_ROW
+    from rft.core.guards import is_blocking
+
+    check = plan.face_spacing_check_mm(
+        "Top face", OPTION_SINGLE_ROW, 3, 2, B_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, None, None,
+    )
+    assert check.report.passes is False
+    assert check.report.layer_results == []
+    assert len(check.report.guard_messages) == 1
+    assert all(is_blocking(g) for g in check.report.guard_messages)
+    assert "option 1" in check.report.guard_messages[0].message
+
+
+def test_face_spacing_check_mm_refuses_sub_minimum_achieved_spacing():
+    """A43/A44: 6 x O16 bars in one 300 mm-wide layer achieve 26.8 mm clear
+    -- below the 50 mm fallback governing minimum (no D_agg given) -- so
+    this REFUSES even though option 2 (stacked) is selected and there is
+    no layer-count contradiction.
+    """
+    from rft.core.spacing import OPTION_STACKED
+    from rft.core.guards import is_blocking
+
+    check = plan.face_spacing_check_mm(
+        "Bottom face", OPTION_STACKED, 6, 1, B_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, None, None,
+    )
+    assert check.governing_min_mm == 50.0
+    assert check.report.passes is False
+    [result] = check.report.layer_results
+    assert result.achieved_clear_mm == pytest.approx(26.8)
+    assert result.passes is False
+    assert len(check.report.guard_messages) == 1
+    assert is_blocking(check.report.guard_messages[0])
+
+
+def test_face_spacing_check_mm_exact_minimum_spacing_passes():
+    """The exact-minimum boundary (achieved == governing) PASSES -- section
+    6.4 only calls strictly-less-than a violation.
+
+    Degenerate-but-exact fixture, chosen by algebra rather than the
+    verification beam: `b=100, cover=0, stirrup=0, bar=0, n=3` gives
+    `achieved = (100 - 0 - 0 - 0) / (3 - 1) = 50.0`, exactly the 50 mm
+    fallback governing minimum (`D_agg` not given).
+    """
+    from rft.core.spacing import (
+        OPTION_STACKED,
+        achieved_clear_spacing_mm,
+        governing_min_spacing_mm,
+    )
+
+    governing_min_mm = governing_min_spacing_mm(0.0, None, None)
+    achieved_mm = achieved_clear_spacing_mm(100.0, 0.0, 0.0, 0.0, 3)
+    assert achieved_mm == governing_min_mm == 50.0, (
+        "this test's own fixture must sit exactly on the boundary it "
+        "claims to check"
+    )
+    check = plan.face_spacing_check_mm(
+        "Top face", OPTION_STACKED, 3, 1, 100.0, 0.0, 0.0, 0.0, None, None,
+    )
+    assert check.report.passes is True
+    assert check.report.guard_messages == []

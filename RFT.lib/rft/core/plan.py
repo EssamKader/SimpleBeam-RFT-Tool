@@ -41,6 +41,11 @@ from rft.core.layout import (
     layer_offset_mm,
     main_layer_v_positions_mm,
 )
+from rft.core.spacing import (
+    MAX_LAYERS as SPACING_MAX_LAYERS,
+    governing_min_spacing_mm,
+    validate_face_spacing,
+)
 from rft.core.stirrups import (
     ZONE_LAYOUT_FLAGS,
     centreline_leg_dimensions_mm,
@@ -213,6 +218,47 @@ def face_plan(is_top, h_mm, b_mm, cover_face_mm, cover_side_mm, cover_end_mm,
             cover_end_mm, "End end",
         ),
     )
+
+
+# --- section 6.2-6.4: the ONE spacing-check computation (#61) --------------
+
+# ``report`` is the `rft.core.spacing.FaceSpacingReport`; ``governing_min_mm``
+# rides alongside it because the report line that states section 6.2's
+# governing minimum is printed even when the face has no ``layer_results``
+# to read it back from (section 6.3 option 1 with more than one layer
+# refuses before building any).
+FaceSpacingCheck = namedtuple("FaceSpacingCheck", "governing_min_mm report")
+
+
+def face_spacing_check_mm(face_label, option, bar_count, layer_count, b_mm,
+                          cover_side_mm, stirrup_dia_mm, bar_dia_mm, d_agg_mm,
+                          min_spacing_override_mm, max_layers=SPACING_MAX_LAYERS):
+    """The ONE computation of section 6.2-6.4's spacing check (#61) --
+    `governing_min_spacing_mm` then `validate_face_spacing`, in that
+    order, from the raw per-face inputs rather than from a pre-derived
+    governing minimum or layer list.
+
+    Both the Review report (`rft.ui.report`) and the placement preflight
+    (`script.py`) call this rather than deriving `validate_face_spacing`'s
+    eight arguments themselves. Before #61 only the report called it; the
+    preflight called nothing at all, so a face that the report printed
+    "REFUSED (section 6.2-6.4)" for was placed anyway. A second call site
+    that re-derives the same arguments is not a fix for that -- it is a
+    second answer that can drift from the first the same way the report
+    and the placer's stirrup zones once did (see `ZONE_LAYOUT_FLAGS`
+    above).
+
+    `rft.core.spacing` is untouched by this: it still owns every formula
+    and every message string. This module only assembles ONE call to it.
+    """
+    governing_min_mm = governing_min_spacing_mm(
+        bar_dia_mm, d_agg_mm, min_spacing_override_mm
+    )
+    report = validate_face_spacing(
+        face_label, option, [bar_count] * layer_count, b_mm, cover_side_mm,
+        stirrup_dia_mm, bar_dia_mm, governing_min_mm, max_layers=max_layers,
+    )
+    return FaceSpacingCheck(governing_min_mm=governing_min_mm, report=report)
 
 
 # Which stirrup of a zone's array Revit itself lays out, per zone (§3.1),

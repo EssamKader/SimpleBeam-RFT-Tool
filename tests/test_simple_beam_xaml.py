@@ -891,3 +891,103 @@ def test_a_first_run_checks_before_loading_stored_data():
         "restoring runs while the window is opening -- a settings file is "
         "not worth failing to open the tool over"
     )
+
+
+def test_place_preflight_checks_spacing_before_the_transaction_opens():
+    """#61 -- the Review report's "REFUSED (section 6.2-6.4)" lines
+    (A43/A44's sub-minimum achieved clear spacing, A36's option 1 with
+    more than one layer) must actually stop Place, not just be printed.
+    script.py cannot be imported (it imports pyrevit), so this parses it
+    with ast rather than grepping for the call: a substring search would
+    be satisfied by a comment, and would not notice `if False and ...`
+    short-circuiting the gate -- both have bitten this repo before (see
+    test_a_first_run_checks_before_loading_stored_data above).
+    """
+    import ast
+
+    tree = ast.parse(io.open(SCRIPT_PATH, encoding="utf-8").read())
+    method = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "on_place_click":
+            method = node
+    assert method is not None, "on_place_click is gone"
+
+    def _calls(node):
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Attribute):
+                    found.add(func.attr)
+                elif isinstance(func, ast.Name):
+                    found.add(func.id)
+        return found
+
+    assert "_spacing_refusal_messages" in _calls(method), (
+        "on_place_click never calls the section 6.2-6.4 preflight"
+    )
+    assert "_dispatch_to_revit_context" in _calls(method), (
+        "_dispatch_to_revit_context is gone -- rewrite this guard against "
+        "whatever now opens the transaction"
+    )
+
+    # The preflight must run BEFORE the transaction opens. Compared by
+    # line number rather than assuming `ast.walk`'s traversal order lines
+    # up with source order across nested blocks.
+    spacing_call_linenos = [
+        child.lineno for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "_spacing_refusal_messages"
+    ]
+    dispatch_call_linenos = [
+        child.lineno for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "_dispatch_to_revit_context"
+    ]
+    assert spacing_call_linenos and dispatch_call_linenos
+    assert max(spacing_call_linenos) < min(dispatch_call_linenos), (
+        "the section 6.2-6.4 spacing preflight must run before "
+        "_dispatch_to_revit_context, not after"
+    )
+
+    # The messages it returns must be GATED by an `if` that can actually
+    # fire and RETURN -- not computed and dropped on the floor, and not
+    # short-circuited by a constant the way one guard in this file was
+    # (`if False and script.data_exists(...)`, above).
+    assign = None
+    for node in ast.walk(method):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            func = node.value.func
+            if isinstance(func, ast.Attribute) and func.attr == "_spacing_refusal_messages":
+                assign = node
+    assert assign is not None, (
+        "nothing captures _spacing_refusal_messages's return value -- a "
+        "call whose result is discarded refuses nothing"
+    )
+    assert len(assign.targets) == 1 and isinstance(assign.targets[0], ast.Name), (
+        "the preflight's result must be bound to a single plain name"
+    )
+    target_name = assign.targets[0].id
+
+    gates = [
+        node for node in ast.walk(method)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name) and node.test.id == target_name
+    ]
+    assert gates, (
+        "the preflight's messages are never checked with `if %s:` -- "
+        "computed and never consulted is the same as never computed" % target_name
+    )
+    for gate in gates:
+        for child in ast.walk(gate.test):
+            value = getattr(child, "value", None)
+            assert not (isinstance(child, ast.Constant) and value in (False, 0, None)), (
+                "the spacing gate is short-circuited by a constant, so it "
+                "never refuses: %s" % ast.dump(gate.test)[:120]
+            )
+        assert any(isinstance(n, ast.Return) for n in ast.walk(gate)), (
+            "the spacing gate must RETURN on a refusal, not fall through "
+            "to the transaction dispatch"
+        )

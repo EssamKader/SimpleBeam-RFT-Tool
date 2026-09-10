@@ -270,6 +270,30 @@ CASES = [
     (WORKFLOW, "compileall -q RFT.lib", "compileall -q RFTlib",
      "tests/test_ironpython_compat.py::test_every_path_the_ci_workflow_names_exists",
      "the shared library path itself mistyped"),
+
+    # #61. The Review report's "REFUSED (section 6.2-6.4)" lines were
+    # never consulted at Place, so a face the report said would fail
+    # (A43/A44's sub-minimum spacing, A36's option-1-with-multiple-layers)
+    # was placed anyway. All three shapes a text guard can miss, per this
+    # ticket's own instruction: the check deleted, short-circuited by a
+    # constant, and present but not returning on a refusal.
+    (SCRIPT, "            spacing_messages = self._spacing_refusal_messages(review, geometry)\n",
+     "",
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the section 6.2-6.4 spacing preflight deleted from Place"),
+
+    (SCRIPT, "            if spacing_messages:",
+     "            if False and spacing_messages:",
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the spacing gate short-circuited by a constant"),
+
+    (SCRIPT, '                    title="Section 6.2-6.4 spacing violation",\n'
+             "                )\n"
+             "                return\n",
+     '                    title="Section 6.2-6.4 spacing violation",\n'
+     "                )\n",
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the spacing gate alerting but not returning, so Place proceeds anyway"),
 ]
 
 
