@@ -42,6 +42,7 @@ GUARDS = "SimpleBeamRFT.extension/lib/rft/core/guards.py"
 SPACING = "SimpleBeamRFT.extension/lib/rft/core/spacing.py"
 SKETCH_PALETTE = "SimpleBeamRFT.extension/lib/rft/ui/sketch_palette.py"
 T = "tests/test_simple_beam_xaml.py::"
+WORKFLOW = ".github/workflows/tests.yml"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
 CATCH_ANCHOR = ("        except Exception as ex:\n"
@@ -249,6 +250,16 @@ CASES = [
              "                return\n", "",
      T + "test_a_first_run_checks_before_loading_stored_data",
      "loading stored data without checking it exists"),
+
+    # The rc3 rename moved the extension, tab, panel and pushbutton and
+    # missed this file, so CI failed on every push while the whole suite
+    # stayed green -- the only consumer of those paths is a shell command.
+    # The mutation is the rename itself, reapplied: put the old extension
+    # folder back and require the guard to notice the path is gone.
+    (WORKFLOW, "compileall -q SimpleBeamRFT.extension/lib",
+     "compileall -q RFTBeamDetailing.extension/lib",
+     "tests/test_ironpython_compat.py::test_every_path_the_ci_workflow_names_exists",
+     "a CI path left behind by a rename"),
 ]
 
 

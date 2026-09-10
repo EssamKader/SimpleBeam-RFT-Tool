@@ -186,3 +186,56 @@ def test_the_suite_declares_every_third_party_module_it_imports():
         assert name in install_line[0], (
             "%s is imported by the suite but the CI install step does not "
             "mention it: %r" % (name, install_line[0].strip()))
+
+
+def test_every_path_the_ci_workflow_names_exists():
+    """Paths inside .github/workflows/tests.yml must exist in the tree.
+
+    The `v0.3.0-rc3` rename moved the extension, the tab, the panel and the
+    pushbutton, and this file was missed. Nothing noticed: the whole suite
+    is green either way, because the only consumer of those two paths is a
+    shell command in CI. It failed on every push from the rename until
+    someone opened the Actions tab, with
+
+        Can't list 'RFTBeamDetailing.extension/lib'
+
+    A rename is exactly when a path in a non-Python file goes stale, and a
+    string in a YAML `run:` block is invisible to every other guard here.
+    This checks the paths by ASKING THE FILESYSTEM rather than by matching
+    text, so it cannot be satisfied by a path that merely looks plausible.
+    """
+    import shlex
+    import yaml
+
+    workflow_path = os.path.join(REPO_ROOT, ".github", "workflows", "tests.yml")
+    workflow = yaml.safe_load(io.open(workflow_path, encoding="utf-8").read())
+
+    commands = []
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            if "run" in step:
+                commands.append(step["run"])
+    assert commands, "guard the guard: no run: steps found in the workflow"
+
+    checked = []
+    missing = []
+    for command in commands:
+        for token in shlex.split(command):
+            looks_like_a_repo_path = (
+                ".extension" in token
+                or token.endswith(".py")
+                or token.endswith(".yaml")
+                or token.endswith(".yml"))
+            if not looks_like_a_repo_path:
+                continue
+            checked.append(token)
+            if not os.path.exists(os.path.join(REPO_ROOT, token)):
+                missing.append(token)
+
+    assert checked, (
+        "guard the guard: the workflow named no repo path at all, so this "
+        "test would pass no matter what those paths said")
+    assert not missing, (
+        "%s: these paths are named by CI but do not exist in the tree, so "
+        "the job fails on every push: %s"
+        % (os.path.relpath(workflow_path, REPO_ROOT).replace("\\", "/"), missing))

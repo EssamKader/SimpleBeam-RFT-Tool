@@ -2,7 +2,7 @@
 #
 # WHY THE GUARDS RUN HERE TOO, and not just pytest.
 #
-# Twelve of this repo's checks read source code as TEXT, because the
+# Many of this repo's checks read source code as TEXT, because the
 # pyRevit script imports `pyrevit` and cannot be imported under CPython at
 # all -- no test can evaluate it. A text check that matches nothing passes
 # silently, and two of them did exactly that: a regex word boundary had
@@ -62,5 +62,5 @@ jobs:
         # Cheap, and it catches the one class of failure a text-only guard
         # cannot: a syntax error in the file no test can import.
         run: |
-          python -m compileall -q RFTBeamDetailing.extension/lib
-          python -m py_compile "RFTBeamDetailing.extension/RFT Beam Detailing.tab/Detail Beam.panel/Detail Beam.pushbutton/script.py"
+          python -m compileall -q SimpleBeamRFT.extension/lib
+          python -m py_compile "SimpleBeamRFT.extension/RFT-Tools.tab/Beams.panel/Simple Beam.pushbutton/script.py"
