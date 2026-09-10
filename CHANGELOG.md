@@ -6,10 +6,17 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.1.0` is the first release, and it is verified**: all three pushbuttons
-placed real reinforcement on real beams in a live Revit 2024 session. It got
-there through six candidates — see the release entry for what each one
-found.
+**`v0.2.0` is the current release, and it is verified**: the single
+`Detail Beam` window opens, picks a beam, reports its plan and places main
+bars, stirrups and crack bars in a live Revit 2024 session. Load this one.
+
+**`v0.1.0` was the first release**, and is also verified — but its ribbon
+is three separate pushbuttons that `v0.2.0` deletes. It is kept tagged as
+the fallback and as the A/B reference, not as something to install
+alongside.
+
+Both got there the same way: through candidates that a fully green test
+suite could not have replaced. Six for `v0.1.0`, eight for `v0.2.0`.
 
 ## Delivery model
 
@@ -32,9 +39,120 @@ command: it clones a third-party extension from a git repo URL rather than
 registering a local folder.
 
 Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
-`RFT Beam Detailing.tab/` → `Main Bars.panel/` → `*.pushbutton/script.py`,
-plus `lib/`, which pyRevit adds to `sys.path` automatically so `rft.core` and
-`rft.revit` import cleanly.
+`RFT Beam Detailing.tab/` → `Detail Beam.panel/` →
+`Detail Beam.pushbutton/script.py`, plus `lib/`, which pyRevit adds to
+`sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
+cleanly. As of `v0.2.0` that is the only panel and the only button: the
+`Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.2.0] — 2026-09-10
+
+**Second release, and the first one that details a beam in one place.** One
+button, one window, one transaction. `Detail Beam` picks a beam, reads its
+geometry and its per-face covers, collects every input across five tabs,
+derives exactly what it is going to place, reports it in words, and then
+places main bars, stirrups and crack bars in a single all-or-nothing
+transaction.
+
+**Verified on a live Revit 2024 host**: the window opens modeless,
+`Pick beam` selects while the window stays open, `Review` reports the plan,
+and `Place` puts real reinforcement in the model.
+
+The three original pushbuttons are **gone**. `v0.1.0`'s ribbon carried
+`Place Main Bars`, `Place Stirrups` and `Place Crack Bars`; this release
+carries one button. **A full Revit restart is required**, not a pyRevit
+reload — pyRevit builds ribbon panels only at startup, and three panels
+have been removed.
+
+### What is new since `v0.1.0`
+
+- **One window, five tabs** — Beam & Materials, Main bars, Stirrups, Crack
+  bars, Review — replacing three buttons that each asked for the same beam
+  again (#46, #47, #48).
+- **Modeless**, so `Pick beam` works with the window on screen, with every
+  Revit API call dispatched through `revit.events.execute_in_revit_context`
+  and a `persistent` engine declared in `bundle.yaml` (#57, #58).
+- **Covers are read per face** from the beam itself, with a supported end
+  shown as "n/a (supported)" rather than a number.
+- **One `RebarBarType` picker per role**, plus the stirrup `RebarHookType`,
+  each option labelled with its **measured** diameter — the type names
+  disagree with the diameters (`16M` measures 15.9 mm), and the measured
+  value is what the tool details against. High-tensile steel for every
+  longitudinal bar, mild for stirrups.
+- **`H_avail` is computed live** from the Main bars tab and shown read-only,
+  so it can no longer disagree with the beam the way `v0.1.0` allowed.
+- **The Review tab derives what will be placed** and refuses by name when a
+  requirement is missing, instead of describing a beam it is not going to
+  build (#50).
+- **One computation behind both the report and the steel.**
+  `lib/rft/core/plan.py` composes the core functions into the numbers that
+  become reinforcement; the report formats the plan the placer executes, so
+  the two cannot describe different beams (#56).
+- **Sky blue and white palette**, the selected tab highlighted, and the
+  beam icon on both the ribbon button and the window title bar (#60).
+- **A teaching diagram in each of the three input tabs** — static vector,
+  no dimensions: they name the vocabulary (layer 1, bars per layer, dense
+  and normal zones, `H_avail`) and deliberately state no size, because a
+  static drawing carrying "43 mm" would contradict whichever beam is loaded
+  (#51).
+- **Two new spec amendments.** A50: crack bars need both faces detailed, or
+  are refused by name. A51: top-bar anchorage uses a *selected* bottom bar
+  type, whether or not that bottom face is placed, and is refused if none is
+  selected.
+
+### What the eight candidates found
+
+Every one of these was invisible to a fully green test suite.
+
+| Candidate | What the live host found |
+|---|---|
+| `rc1` | The window was **modal**. `Pick beam` could not select anything until the window was closed (#57). |
+| `rc2` | pyRevit tore down the IronPython engine when the script returned, so the `ExternalEvent` never delivered: `Pick beam` hung on "waiting for Revit..." forever. Fixed by `engine: persistent` in `bundle.yaml` (#58). |
+| `rc3` | Labels an engineer could not read — clipped mid-word by fixed-width columns, and written in spec notation ("1/2, section 6.3") where `v0.1.0` had said "1=single wide row, 2=stacked". |
+| `rc4` | `Place` died on `AttributeError: 'ReviewDerivation' object has no attribute 'crack'` — the field is `crack_bars`. The transaction rolled back, so nothing was placed and nothing was damaged. |
+| `rc5` | **Two guards were incapable of failing.** A literal backspace byte had been written where a regex `\b` belonged, so the pattern matched nothing and the test passed *against the defect it was written for*. Found `tools/prove_guards.py`. |
+| `rc6` | The window would not open: `Cannot find resource named 'SurfaceWhite'`. A `StaticResource` on the `<Window>` element itself, whose attributes resolve **before** `Window.Resources` is populated. The XML was well-formed, so `test_xaml_parses` was green — a WPF semantic error inside valid markup. |
+| `rc7` | Palette and ribbon icon accepted. The window's own title bar still showed Revit's default icon: `WPFWindow.set_icon` is a separate call from the button's `icon.png`. |
+| `rc8` | **Working.** Palette, both icons and the three teaching diagrams confirmed by the owner. Promoted to `v0.2.0` with no code change. |
+
+### Closes
+
+Wayfinder #33 and its decision tickets #34–#43 (recorded as A47–A49),
+#44 (U0 core additions), #46 (the shell), #47 (Beam & Materials), #48 (the
+three reinforcement tabs), #50 (Review derivation and report), #51 (legend
+and symbol reference), #55 (retire the three pushbuttons), #56 (port the
+placement paths into the one transaction), and the four defects the live
+tests found: #57, #58, #59, #60.
+
+### Verified, and not verified
+
+**Verified**: the window opens, picks a beam, reads geometry and covers,
+derives its plan, reports it, and places main bars, stirrups and crack bars
+in one transaction on a live host.
+
+**Not verified**: that every placed bar is dimensionally correct in every
+configuration. The A/B comparison against `v0.1.0` — the same beam detailed
+through the old three buttons and through the new window, then measured —
+has **not** been run. `v0.1.0` stays tagged so it still can be.
+
+**Also not verified by anything automated**: the window itself. `script.py`
+imports `pyrevit` and cannot be imported under CPython, so 12 of its
+invariants are checked as **source text** instead. Each of those 12 is
+proven by mutation — `python tools/prove_guards.py` reintroduces the defect
+each guard was written for and requires the guard to fail. A guard that has
+never been shown to fail has not been tested, only written.
+
+### Still deferred
+
+Multi-span beams (rev 2 section 9 item 2) remain out of scope by decision,
+and are refused at runtime rather than silently mishandled. Single-span
+rectangular beams only.
+
+### Tests
+
+363 pass. 12 of 12 text guards proven by mutation.
+
+---
 
 ## [v0.2.0-rc5] — 2026-09-10
 
@@ -58,7 +176,7 @@ uses.
 
 Writing that guard exposed it. Its own mutation test reported MISSED, and
 the cause was a literal **backspace byte** where a regex word boundary
-should have been: `` written into the file as the control character it
+should have been: `\b` written into the file as the control character it
 denotes rather than as two characters. The pattern matched nothing, so the
 check passed — against the very defect it was written for.
 
