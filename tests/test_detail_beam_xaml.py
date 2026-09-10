@@ -305,6 +305,16 @@ def test_beam_scoped_attributes_are_not_double_assigned_in_init():
 API_CALLS_NEEDING_CONTEXT = ("revit.pick_element", "run_in_transaction")
 
 
+REPORT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "RFTBeamDetailing.extension", "lib", "rft", "ui", "report.py",
+)
+
+
+def _report_module_source():
+    return io.open(REPORT_PATH, encoding="utf-8").read()
+
+
 def _method_body(name):
     text = io.open(SCRIPT_PATH, encoding="utf-8").read()
     start = text.index("    def {}(self".format(name))
@@ -462,9 +472,9 @@ def test_report_and_placement_both_use_the_shared_plan():
     # mentioned somewhere would still pass with one of them ripped out and
     # recomputed by hand. Mutation testing is what exposed that -- the
     # first version of this assertion survived exactly that change.
-    required = {
-        "_report_one_main_face": ("face_layer_plans", "end_plan"),
-        "_build_placement_plans": (
+    required = (
+        # (source text, what to search, required core_plan calls)
+        (_method_body("_build_placement_plans"), "_build_placement_plans", (
             "face_plan", "stirrup_plan", "crack_plan",
             # The crack plan's two H_avail offsets. Before this call
             # existed the placer built a WHOLE FacePlan per face just to
@@ -473,15 +483,21 @@ def test_report_and_placement_both_use_the_shared_plan():
             # count, which a face that is detailed but not placed does
             # not have.
             "innermost_layer_offset_mm",
-        ),
-    }
-    for method, calls in required.items():
-        body = _method_body(method)
+        )),
+        # The report moved to rft/ui/report.py, which -- unlike script.py
+        # -- can be imported and executed by tests
+        # (tests/test_ui_report.py). This text check stays anyway: those
+        # tests pin the report's OUTPUT, and identical output is exactly
+        # what a hand-rolled second computation produces right up until
+        # the day it does not.
+        (_report_module_source(), "rft/ui/report.py", ("face_layer_plans", "end_plan")),
+    )
+    for body, where, calls in required:
         for call in calls:
             assert "core_plan.{}(".format(call) in body, (
                 "%s must obtain its dimensions from rft.core.plan.%s, not "
                 "compute them itself -- otherwise the Review report and the "
-                "placed steel can disagree (#56)." % (method, call)
+                "placed steel can disagree (#56)." % (where, call)
             )
 
 
