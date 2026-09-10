@@ -502,13 +502,27 @@ def test_report_and_placement_both_use_the_shared_plan():
             "stirrup_plan", "crack_plan", "innermost_layer_offset_mm",
         )),
     )
-    for body, where, calls in required:
-        for call in calls:
-            assert "core_plan.{}(".format(call) in body, (
-                "%s must obtain its dimensions from rft.core.plan.%s, not "
-                "compute them itself -- otherwise the Review report and the "
-                "placed steel can disagree (#56)." % (where, call)
-            )
+    # The missing calls are collected into a small list and THAT is
+    # asserted on, rather than asserting `call in body` directly.
+    #
+    # pytest rewrites an assert to show its operands, and `body` here is a
+    # whole module -- 500 lines of it. The direct form printed the entire
+    # source on failure, which filled the pipe of the mutation prover
+    # running this test and deadlocked it, leaving a mutated file in the
+    # working tree. An assertion message is a diagnostic; it should be the
+    # size of the fact it reports.
+    missing = [
+        (where, call)
+        for body, where, calls in required
+        for call in calls
+        if "core_plan.{}(".format(call) not in body
+    ]
+    assert not missing, (
+        "these consumers must obtain their dimensions from rft.core.plan, "
+        "not compute them again -- otherwise the Review report and the "
+        "placed steel can disagree (#56): %s"
+        % ["%s is missing core_plan.%s()" % (w, c) for w, c in missing]
+    )
 
 
 def test_the_placer_does_not_rebuild_a_face_plan_for_the_crack_offsets():

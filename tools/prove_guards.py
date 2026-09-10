@@ -180,11 +180,30 @@ def main():
         try:
             io.open(path, "w", encoding="utf-8", newline="\n").write(
                 original.replace(find, replace, 1))
+            # Anything that raises between here and the finally leaves a
+            # mutated file behind, which is why the timeout above matters
+            # as much as the restore below.
             # A case may name a fully qualified node ("path::test") when
             # its test lives outside the XAML suite; otherwise T applies.
             node = test if "::" in test else T + test
-            rc = subprocess.call(["python", "-m", "pytest", node, "-q"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            # ``subprocess.run``, not ``call``, and NOT a bare PIPE.
+            #
+            # This used to be ``call(..., stdout=PIPE, stderr=STDOUT)``,
+            # which hands the child a pipe that nobody ever reads. As long
+            # as every failure message was small it worked. Then a guard
+            # arrived whose failing assertion printed a 500-line module
+            # source as an operand, the child filled the OS pipe buffer,
+            # blocked on write, and the parent waited for it forever --
+            # with a mutated file sitting in the working tree, because the
+            # restore is in the ``finally`` that never ran.
+            #
+            # ``run`` drains the pipes, and the timeout turns any future
+            # hang into a reported failure instead of a stopped tool.
+            rc = subprocess.run(
+                ["python", "-m", "pytest", node, "-q"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                timeout=300,
+            ).returncode
         finally:
             _git("checkout", "--", path)
             restored = io.open(path, encoding="utf-8").read()
