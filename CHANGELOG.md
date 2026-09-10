@@ -11,78 +11,158 @@ was released on a reported test of `v0.3.0-rc4` that had in fact been run
 against `v0.3.0-rc3`, because the deployed worktree was never moved.
 **`v0.2.1` remains the last release confirmed on a live host.**
 
-**`v0.3.1-rc2` is the CANDIDATE to test**, and it supersedes `rc1`, which
-was never loaded on a host. It carries rc1's library move to `RFT.lib`
-(#64) plus #61 -- Place now REFUSES on a section 6.2-6.4 spacing
-violation instead of printing REFUSED and placing the bars anyway.
+**`v0.3.1-rc3` is the CANDIDATE to test.** It carries everything the
+earlier `v0.3.1` candidates did and adds #65:
 
-The window title now names the build: check it says `v0.3.1-rc2` before
-trusting anything else you see. Read its install note first --
-registering it beside `v0.3.0` gives you two buttons both called Simple
-Beam, which is the one way to make this confusing.
+- **#64** (from rc1) -- the library moved to `RFT.lib`, so a second
+  element can import it.
+- **#61** (from rc2) -- Place REFUSES on a section 6.2-6.4 spacing
+  violation instead of printing REFUSED and placing the bars anyway.
+- **the version stamp** (from rc2) -- the window title names the build.
+- **#65** (new) -- a face with a bar count but no bar type no longer
+  places everything else in silence.
 
-**`v0.2.1` is the last VERIFIED release.** Go back to it if a candidate
-misbehaves.
-The single `Detail Beam` window opens, picks a beam, reports its plan and
-places main bars, stirrups and crack bars in a live Revit 2024 session --
-confirmed by the project owner on `v0.2.0` and again on `v0.2.1` after the
-stirrup grouping changed, with the three stirrup sets checked in the
-model.
+Neither rc1 nor rc2 was confirmed on a host, so test this one instead of
+either. **Check the window title reads `v0.3.1-rc3` first**; if it does
+not, nothing else you observe is about this candidate.
 
-`v0.2.1` fixes two defects in `v0.2.0`: a crash in Place on one valid
-combination of inputs, and a Review report that described the stirrup sets
-with the wrong grouping.
+## [v0.3.1-rc3] — 2026-09-10
 
-**`v0.1.0` was the first release**, and is also verified — but its ribbon
-is three separate pushbuttons that `v0.2.0` deletes. It is kept tagged as
-the fallback and as the A/B reference, not as something to install
-alongside.
+**Contains rc2 in full, plus #65.** 514 tests, 46 of 46 guards proven.
 
-Both got there the same way: through candidates that a fully green test
-suite could not have replaced. Six for `v0.1.0`, eight for `v0.2.0`.
+### A half-filled face is no longer silent (#65)
 
-## Delivery model
+Found by the project owner on a live host, and read back out of his model
+to confirm it: he entered a bottom bar count, pressed Place, and got **4
+top bars, 3 stirrup sets, 6 crack bars and NO bottom bars**, with no
+message of any kind.
 
-This is a **pyRevit extension** — not a standalone application, and not a
-Revit `.addin` / compiled add-in. There is no installer, no `.sln`, no DLL to
-build, and none should be added.
+His words: *"not best practice to model remaining part without mentioning
+that bottom bars was not modelled -- and maybe user put number 8 by
+mistake, so it should warn me."*
 
-Deployment means registering, as a pyRevit extension search path, the
-folder that **contains** `SimpleBeamRFT.extension` — checked out at a
-**tagged commit**, never at whatever `master` happens to be:
+The cause was that a main face is only "requested" when its bar type is
+selected **and** its count entered. His bottom bar type was unpicked, so
+the face was not requested: the sketch drew nothing for it, the placer
+skipped it, and #61's spacing preflight never examined it. Three separate
+silences, one forgotten picker.
+
+### The rule: a bar COUNT is the statement of intent
+
+Place now REFUSES, before the transaction opens, when a face has a **bar
+count entered** and either:
+
+- **no bar type selected** -- the reported defect: intent stated, bars
+  silently omitted; or
+- **no layer count entered** -- which was not merely silent. It raised
+  `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'`
+  from inside `core_plan.face_plan` with the transaction already open, so
+  the engineer saw a bare "Placement FAILED and was rolled back --
+  TypeError" and no indication which field was missing. Same class as the
+  crack-bar `TypeError` that `v0.2.1` fixed.
+
+Every other combination stays silent:
+
+| bar type | count | layers | |
+|---|---|---|---|
+| -- | -- | -- | silent (nothing asked for) |
+| yes | -- | yes | **silent** -- this is what a #54 restore looks like |
+| yes | -- | -- | **silent** -- bar types picked up front |
+| -- | -- | yes | silent (a leftover layer count) |
+| -- | yes | -- | REFUSES (no type, no layers) |
+| -- | yes | yes | REFUSES (no type) |
+| yes | yes | -- | REFUSES (no layers) |
+| yes | yes | yes | silent (complete) |
+
+**The asymmetry is the whole design.** A bar type or a layer count can be
+a default, a leftover, or a value #54 restored -- none of them says
+"detail this face". A count is something the engineer typed for THIS
+beam, which is exactly why an unhonoured one has to be reported.
+
+### The rule shipped wrong once, and #54 is what caught it
+
+The first implementation treated all three fields symmetrically: any one
+present made the others required. That was faithful to #65's stated
+acceptance criteria, and those criteria were wrong.
+
+#54 restores both bar types and both layer counts while **deliberately
+withholding the bar counts**, so that Place opens disabled on a fresh
+beam. Under the symmetric rule, both faces of every restored beam read as
+half-filled, and Place would have refused until counts were entered for
+BOTH faces -- on the second beam onward in any project, which is the
+entire purpose of #54. It also broke the ordinary habit of picking all
+four bar types up front and then detailing one face.
+
+Caught in review by running the corrected function against the project
+owner's **real** stored settings file rather than a hand-built fixture.
+`tests/test_ui_derivation.py::test_a_full_restore_leaves_no_face_refusing`
+now pins it: it round-trips the real `to_store`/`from_store` and asserts
+neither face refuses. Two features can each be right and still contradict
+each other; only a test that runs both at once notices.
+
+### The sketch says why a face is blank
+
+`_sketch_face_data` used to return nothing when a face's bar type, count
+or layer count was missing, and the renderer drew nothing at all -- a
+face with no bars was indistinguishable from a face nobody asked for. It
+now carries a caption: `"Bottom: no type"`, `"Top: no layers"`,
+`"Bottom: no type/layers"` -- 12 to 22 characters, inside #62's budget,
+placed through `rft.ui.sketch` and `sketch_layout.place_labels` like
+every other label, with no new drawing path in `script.py`.
+
+A face that is silent for Place draws no caption either, so a restored
+beam is not annotated about counts that were withheld on purpose.
+
+### The guard
+
+`script.py` cannot be imported, so the preflight is guarded structurally
+by `ast`. Five attacks were run against it by hand, beyond the prover's
+own cases, and all five fail the guard: re-nested in `if False:`,
+re-nested in `if 1 == 2:`, re-nested in the **plausible-looking**
+`if self.beam is not None:`, moved to after the transaction dispatch, and
+its `return` replaced by `pass`. The plausible one is the case that
+matters -- it is not constant-false and reads as legitimate code; what
+catches it is asserting the call is a DIRECT statement of the method
+body, which is decidable, rather than reasoning about reachability, which
+is not.
+
+### Installing
+
+Your deploy worktree is the registered search path, so:
 
 ```
-git worktree add <somewhere>/rft-<tag> <tag>
-pyrevit extensions paths add <somewhere>/rft-<tag>
+git -C "D:\RFT-Deploy\rft-testing" checkout v0.3.1-rc3
 ```
 
-then reload pyRevit. See `docs/deployment.md` for the full procedure and for
-why `pyrevit extend` — which this section previously named — is the wrong
-command: it clones a third-party extension from a git repo URL rather than
-registering a local folder.
+then restart Revit. **Check the window title reads `v0.3.1-rc3`** before
+trusting anything else you see.
 
-Layout is **two** pyRevit extensions, siblings under the registered
-search root:
+### What to test
 
-```
-RFT.lib/rft/                        <- the LIBRARY extension
-SimpleBeamRFT.extension/
-└── RFT-Tools.tab/ → Beams.panel/ → Simple Beam.pushbutton/script.py
-```
+**#65, the one just fixed.** Leave the bottom bar type UNPICKED, enter a
+bottom bar count, press Place. It must refuse and place nothing; the
+cross-section must carry a `Bottom: no type/layers` caption instead of
+silently blank. Then pick the type and leave the layer count blank: it
+must refuse naming the layer count, not crash with "Placement FAILED".
 
-`RFT.lib` is a pyRevit **library extension**: a folder whose name ends in
-`.lib` is added to the module path of **every** UI extension, which is
-what lets a future element tool import `rft.core`, `rft.revit` and
-`rft.ui`. The path added is the `.lib` folder itself, so the package sits
-at `RFT.lib/rft`, and the UI extension must contain no `rft` copy of its
-own — an extension's internal paths take precedence and would shadow the
-shared one. Both properties are guarded by
-`tests/test_library_extension_layout.py`; see
-`docs/reuse-for-new-elements.md`. Moved out of
-`SimpleBeamRFT.extension/lib/` by #64.
+**#61, still never exercised on a host.** Pick the bottom bar type, then
+8 bars per layer, 1 layer. With cover 38.1 mm, 10M stirrups, 16T bars and
+`D_agg` 30 the governing minimum is 39.9 mm and 8 bars achieve 11.0 mm,
+so it must refuse. Anything from 5 bars per layer up refuses; 4 places.
 
-As of `v0.2.0` that is the only panel and the only button: the
-`Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+**#54, also never exercised.** Detail one beam, then pick a second in the
+same project: layer counts, spacings, multipliers, closure type and all
+three bar types come back -- the two bar counts and the stirrup hook stay
+blank, with Place disabled. That is deliberate, and it is what the new
+rule had to be reconciled with.
+
+### Still open
+
+**#63** -- spacer bars are never modelled. Where the shared library is
+versioned once a second element exists is still undecided. Single-span
+only.
+
+---
 
 ## [v0.3.1-rc2] — 2026-09-10
 
