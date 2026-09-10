@@ -29,7 +29,7 @@ if not op.exists(xaml_file):
 ```
 
 **`EXEC_PARAMS.command_path` is the running pushbutton's own folder.** So
-`WPFWindow("RftWindow.xaml")` inside `Detail Beam.pushbutton/` resolves to
+`WPFWindow("RftWindow.xaml")` inside `Simple Beam.pushbutton/` resolves to
 the XAML sitting beside `script.py`, with no path juggling. This is the
 mechanism, not an inference.
 

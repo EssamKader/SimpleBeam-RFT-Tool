@@ -1,0 +1,6 @@
+{
+    "name": "SimpleBeamRFT",
+    "description": "Reinforcement detailing for single-span rectangular concrete beams, per beam_rebar_detailing_spec_v2.docx. Ships one button, Simple Beam, on the shared RFT-Tools ribbon tab; future element tools (walls, columns) can share that tab from their own extensions.",
+    "author": "Essam Kader",
+    "url": "https://github.com/EssamKader/SimpleBeam-RFT-Tool.git"
+}

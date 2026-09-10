@@ -1,0 +1,35 @@
+title: "Simple\nBeam"
+tooltip: >-
+  Reinforcement for a SINGLE-SPAN RECTANGULAR beam, in one command and one
+  transaction: main bars top and bottom, three-zone stirrups, and crack/
+  skin bars where the section depth calls for them.
+
+  Pick a beam, choose a bar type per role, enter counts and spacings, and
+  the sketch redraws as you type -- with achieved spacing and the
+  top/bottom clearance coloured green or red, so a violation is visible
+  before anything reaches the model. Review states every offset, position,
+  anchorage and warning it is about to place. Place is all-or-nothing:
+  either the whole cage goes in, or the transaction rolls back and nothing
+  does.
+
+  SCOPE: single span only. A continuous run is detected and REFUSED rather
+  than detailed as if it were simply supported (rev 2 section 9 item 2).
+
+  See specs/ui-single-window.md and docs/spec-amendments.md.
+author: Essam Kader
+
+# REQUIRED, not optional (#59). The window is MODELESS, so its event
+# handlers run after script.py has returned. Without a persistent engine
+# pyRevit tears the IronPython engine down at that point: the window
+# survives (it is a CLR object) and a click handler can still update a
+# TextBlock, but the ExternalEvent that carries every Revit API call is
+# raised into a dead engine and never delivers. The symptom is exactly
+# what the first live test saw -- "Pick beam -- waiting for Revit..."
+# forever, with no error anywhere, because the failure happens upstream of
+# the wrapper that would have reported it.
+#
+# This is the other half of pyRevit's own precedent: Measure.pushbutton
+# sets it in its bundle.yaml, not in its script. Reading only the script
+# is how it was missed in v0.2.0-rc2.
+engine:
+  persistent: true

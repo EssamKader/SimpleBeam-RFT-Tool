@@ -27,14 +27,14 @@ equivalent GUI route is pyRevit Settings -> Custom Extension Directories.
 To back the install out: `pyrevit extensions paths forget "<path>"`, then
 `git worktree remove "<path>"`.
 
-**The registered path is the folder that *contains* `RFTBeamDetailing.extension`,
+**The registered path is the folder that *contains* `SimpleBeamRFT.extension`,
 not the `.extension` folder itself.** pyRevit scans each search path for
 child directories whose names end in `.extension`; naming the bundle
 directly registers a path with no extensions in it, and the tab never
 appears.
 
 *(An earlier draft of this document gave
-`pyrevit extend "<repo>/RFTBeamDetailing.extension"` after a
+`pyrevit extend "<repo>/SimpleBeamRFT.extension"` after a
 `git checkout <tag>`. That command does not do this job -- verified against
 the installed CLI, `pyrevit v6.1.0.26047`: `pyrevit extend` **clones a
 third-party extension from a git repo URL** into pyRevit's own extensions

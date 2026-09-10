@@ -24,7 +24,7 @@ import os
 import re
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXT_ROOT = os.path.join(REPO_ROOT, "RFTBeamDetailing.extension")
+EXT_ROOT = os.path.join(REPO_ROOT, "SimpleBeamRFT.extension")
 
 # PEP 263: the cookie must appear on line 1 or line 2 to be honoured.
 CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)")

@@ -407,7 +407,7 @@ def test_only_one_module_defines_the_zone_layout_flags():
 
     lib = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "RFTBeamDetailing.extension", "lib")
+        "SimpleBeamRFT.extension", "lib")
     definers = []
     for dirpath, _dirnames, filenames in os.walk(lib):
         if "__pycache__" in dirpath:

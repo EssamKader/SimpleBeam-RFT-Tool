@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the RFT Beam Detailing tool.
+All notable changes to the RFT-Tools tool.
 
 A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
@@ -37,7 +37,7 @@ Revit `.addin` / compiled add-in. There is no installer, no `.sln`, no DLL to
 build, and none should be added.
 
 Deployment means registering, as a pyRevit extension search path, the
-folder that **contains** `RFTBeamDetailing.extension` — checked out at a
+folder that **contains** `SimpleBeamRFT.extension` — checked out at a
 **tagged commit**, never at whatever `master` happens to be:
 
 ```
@@ -50,9 +50,9 @@ why `pyrevit extend` — which this section previously named — is the wrong
 command: it clones a third-party extension from a git repo URL rather than
 registering a local folder.
 
-Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
-`RFT Beam Detailing.tab/` → `Detail Beam.panel/` →
-`Detail Beam.pushbutton/script.py`, plus `lib/`, which pyRevit adds to
+Layout follows pyRevit convention — `SimpleBeamRFT.extension/` containing
+`RFT-Tools.tab/` → `Beams.panel/` →
+`Simple Beam.pushbutton/script.py`, plus `lib/`, which pyRevit adds to
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.

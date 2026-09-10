@@ -3,7 +3,7 @@ import sys
 
 _LIB = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension",
+    "SimpleBeamRFT.extension",
     "lib",
 )
 if _LIB not in sys.path:

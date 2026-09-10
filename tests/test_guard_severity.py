@@ -51,7 +51,7 @@ from rft.core.spacing import validate_face_spacing
 
 LIB = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension", "lib", "rft",
+    "SimpleBeamRFT.extension", "lib", "rft",
 )
 
 # (a guard, its severity as v0.1.0 actually behaved)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """#47 (U3) -- guards against an ``x:Name`` typo between
-``DetailBeamWindow.xaml`` and ``script.py``, which pyRevit's ``WPFWindow``
+``SimpleBeamWindow.xaml`` and ``script.py``, which pyRevit's ``WPFWindow``
 would surface only as an ``AttributeError`` on a live host (``script.py``
 itself cannot be imported here -- it imports ``pyrevit``, which is not
 installed under plain CPython; see ``tests/fake_revit_api.py``'s header).
@@ -18,12 +18,12 @@ import xml.etree.ElementTree as ET
 
 PUSHBUTTON_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension",
-    "RFT Beam Detailing.tab",
-    "Detail Beam.panel",
-    "Detail Beam.pushbutton",
+    "SimpleBeamRFT.extension",
+    "RFT-Tools.tab",
+    "Beams.panel",
+    "Simple Beam.pushbutton",
 )
-XAML_PATH = os.path.join(PUSHBUTTON_DIR, "DetailBeamWindow.xaml")
+XAML_PATH = os.path.join(PUSHBUTTON_DIR, "SimpleBeamWindow.xaml")
 SCRIPT_PATH = os.path.join(PUSHBUTTON_DIR, "script.py")
 
 X_NAME = "{http://schemas.microsoft.com/winfx/2006/xaml}Name"
@@ -36,7 +36,7 @@ NON_XAML_SELF_ATTRS = {
     "beam", "host_data", "geometry_mm", "selection",
     "_bar_type_options_by_role", "_hook_type_options",
     # BeamMaterialsSelection's own attributes (a DIFFERENT "self" -- its
-    # __init__, not DetailBeamWindow's).
+    # __init__, not SimpleBeamWindow's).
     "top_main_bar_type", "bottom_main_bar_type", "stirrup_bar_type",
     "crack_bar_type", "stirrup_hook_type", "stirrup_hook_angle_deg",
     # #48 (U4) -- ordinary Python state, not an x:Name control.
@@ -60,7 +60,7 @@ NON_XAML_SELF_ATTRS = {
     # attributes and neither is an x:Name control.
     "set_icon",
     # #49 (U5) -- FrameworkElement.FindResource, a real inherited WPF/.NET
-    # method (DetailBeamWindow -> forms.WPFWindow -> Window ->
+    # method (SimpleBeamWindow -> forms.WPFWindow -> Window ->
     # FrameworkElement) used by the sketch renderer to look up a brush by
     # its x:Key name. Not an x:Name control itself.
     "FindResource",
@@ -186,7 +186,7 @@ def test_every_self_attr_the_script_treats_as_a_xaml_control_exists():
     missing = sorted(referenced - xaml_names)
     assert not missing, (
         "script.py references self.<name> for these names, which have no "
-        "matching x:Name in DetailBeamWindow.xaml (AttributeError on a "
+        "matching x:Name in SimpleBeamWindow.xaml (AttributeError on a "
         "live host): %s" % missing
     )
 
@@ -288,7 +288,7 @@ def test_beam_scoped_attributes_are_not_double_assigned_in_init():
     worth failing on rather than tidying away silently.
     """
     text = io.open(SCRIPT_PATH, encoding="utf-8").read()
-    start = text.index("    def __init__(self):", text.index("class DetailBeamWindow"))
+    start = text.index("    def __init__(self):", text.index("class SimpleBeamWindow"))
     end = text.index("\n    # ", start)
     init_body = text[start:end]
     duplicated = [
@@ -312,7 +312,7 @@ API_CALLS_NEEDING_CONTEXT = ("revit.pick_element", "run_in_transaction")
 
 REPORT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension", "lib", "rft", "ui", "report.py",
+    "SimpleBeamRFT.extension", "lib", "rft", "ui", "report.py",
 )
 
 

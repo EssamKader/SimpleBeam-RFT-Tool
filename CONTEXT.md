@@ -1,4 +1,4 @@
-# Project Context — RFT Beam Detailing Tool
+# Project Context — RFT-Tools Tool
 
 ## Standing rule: the spec is the source of truth
 
@@ -48,7 +48,7 @@ and **not** a Revit `.addin` / compiled add-in.
   do not add any, and do not propose a C# port.
 - Python only, against pyRevit's engine.
 - Layout stays pyRevit-conventional:
-  `RFTBeamDetailing.extension/` → `<Name>.tab/` → `<Name>.panel/` →
+  `SimpleBeamRFT.extension/` → `<Name>.tab/` → `<Name>.panel/` →
   `<Name>.pushbutton/script.py`, with shared code under the extension's
   `lib/` (pyRevit puts that on `sys.path` automatically, which is why
   `rft.core` / `rft.revit` import without path juggling).

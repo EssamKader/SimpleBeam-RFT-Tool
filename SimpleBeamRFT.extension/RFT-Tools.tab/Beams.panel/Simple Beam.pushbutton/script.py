@@ -359,7 +359,7 @@ def _parse_positive_float(text, field_label):
     return value
 
 
-class DetailBeamWindow(forms.WPFWindow):
+class SimpleBeamWindow(forms.WPFWindow):
     """The five-tab shell (issue #46). "Beam & Materials" (#47) and the
     Main bars/Stirrups/Crack bars tabs (#48, this ticket) collect inputs;
     Review's derivation and report (#50) and placement itself (#56) are
@@ -369,7 +369,7 @@ class DetailBeamWindow(forms.WPFWindow):
         # Bare filename: WPFWindow._determine_xaml resolves it against
         # EXEC_PARAMS.command_path, the folder this script sits in --
         # confirmed by the #42 spike, not re-derived here.
-        forms.WPFWindow.__init__(self, "DetailBeamWindow.xaml")
+        forms.WPFWindow.__init__(self, "SimpleBeamWindow.xaml")
 
         self.beam = None
         self.host_data = None
@@ -2265,7 +2265,7 @@ window = None
 
 def main():
     global window
-    window = DetailBeamWindow()
+    window = SimpleBeamWindow()
     # MODELESS (issue #57). ShowDialog() disables every other top-level
     # window in the process -- Revit's main window included -- so
     # Selection.PickObject could never receive a click in the viewport and

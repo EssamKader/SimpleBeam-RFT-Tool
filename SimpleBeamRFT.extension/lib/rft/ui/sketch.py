@@ -69,7 +69,7 @@ SketchPolygon = namedtuple("SketchPolygon", ["points", "style"])
 
 # The closed set of style keys this module ever emits. ``script.py``'s
 # renderer must declare a brush mapping for every one of these (a text
-# guard in tests/test_detail_beam_xaml.py checks this both ways), so a new
+# guard in tests/test_simple_beam_xaml.py checks this both ways), so a new
 # style key added here without a matching renderer entry fails loudly
 # instead of drawing invisible (default-black-on-white) shapes on a live
 # host that nothing here can execute to notice.

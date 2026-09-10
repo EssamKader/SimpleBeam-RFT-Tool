@@ -1,0 +1,9 @@
+# The PANEL names the ELEMENT, so walls and columns get their own panels
+# beside this one rather than crowding in among the beam buttons -- from
+# this repo or from a separate extension sharing the RFT-Tools tab.
+#
+# Deliberately "Beams" and not "Simple Beam": the panel is the element,
+# the BUTTON is the case. A future continuous- or multi-span beam tool
+# belongs on this panel, next to Simple Beam, not on one of its own.
+title: Beams
+author: Essam Kader

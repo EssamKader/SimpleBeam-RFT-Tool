@@ -1,6 +1,0 @@
-{
-    "name": "RFTBeamDetailing",
-    "description": "Automated rebar detailing (main bars, stirrups, crack/skin bars) for single-span rectangular concrete beams, per beam_rebar_detailing_spec_v2.docx.",
-    "author": "Essam Kader",
-    "url": "https://github.com/EssamKader/rft-beam-detailing.git"
-}

@@ -12,7 +12,7 @@ ways under plain CPython:
    draw with WPF's default (black on white), which nothing here can
    execute to notice.
 2. Every brush name this module names is declared with an ``x:Key`` in
-   ``DetailBeamWindow.xaml`` (``tests/test_detail_beam_xaml.py``), which is
+   ``SimpleBeamWindow.xaml`` (``tests/test_simple_beam_xaml.py``), which is
    how a typo'd resource name is caught before it becomes a
    "Cannot find resource" exception at paint time on a live host.
 
@@ -26,7 +26,7 @@ a silently-wrong one still misleads the same way a silently-wrong
 dimension would).
 
 One brush here, ``PassGreen``, does not exist among the ten brushes
-``DetailBeamWindow.xaml`` already declares for #60's palette -- none of
+``SimpleBeamWindow.xaml`` already declares for #60's palette -- none of
 those ten is green, and the notation SVG (docs/ui/sketch-notation.svg)
 uses green specifically for "complies" (crack/skin bars, a passing
 spacing dimension). It is declared in this ticket's XAML edit, in

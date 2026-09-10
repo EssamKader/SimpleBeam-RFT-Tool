@@ -1,4 +1,4 @@
-# RFT Beam Detailing Tool
+# RFT-Tools Tool
 
 A pyRevit / Revit API tool for automated **simple beam rebar (RFT) detailing**
 — single-span, rectangular concrete beams. Modeled after the workflow of

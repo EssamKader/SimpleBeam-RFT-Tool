@@ -1,4 +1,4 @@
-# Revit API Strategy — Research Findings (RFT Beam Detailing Tool)
+# Revit API Strategy — Research Findings (RFT-Tools Tool)
 
 Documentation-only research, no live Revit host used. Target: Revit 2023+, pyRevit
 (IronPython/CPython) against the .NET API. Every claim is sourced; anything not

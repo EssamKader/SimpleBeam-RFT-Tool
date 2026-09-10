@@ -1,0 +1,10 @@
+# The RIBBON TAB, and the one name here meant to outlive this repo.
+#
+# pyRevit merges tabs by title across extensions, so any future
+# reinforcement tool -- walls, columns, slabs -- can ship as its own
+# extension, declare this same title, and land on this same ribbon tab
+# beside the beam tools rather than adding a tab per element. That is why
+# it is "RFT-Tools" and not "Beam Detailing": the tab names the domain,
+# the PANELS name the elements, and the buttons name the cases.
+title: RFT-Tools
+author: Essam Kader

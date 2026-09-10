@@ -6,7 +6,7 @@ effort: medium
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-You implement **one scoped ticket** for the RFT Beam Detailing tool — a
+You implement **one scoped ticket** for the RFT-Tools tool — a
 pyRevit / Revit API tool that automates rebar detailing for single-span
 rectangular concrete beams.
 

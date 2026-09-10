@@ -354,7 +354,7 @@ def test_every_report_input_field_is_actually_read():
 
     path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "RFTBeamDetailing.extension", "lib", "rft", "ui", "report.py")
+        "SimpleBeamRFT.extension", "lib", "rft", "ui", "report.py")
     source = io.open(path, encoding="utf-8").read()
     body = source[source.index("def derivation_lines"):]
     unread = [f for f in ui_report.ReportInputs._fields

@@ -4,9 +4,9 @@
 Two directions, both load-bearing: every style ``rft.ui.sketch`` can emit
 must be mapped (or the renderer draws it with WPF's invisible default),
 and every brush name this module names must actually be declared in
-``DetailBeamWindow.xaml`` (or the renderer throws "Cannot find resource"
+``SimpleBeamWindow.xaml`` (or the renderer throws "Cannot find resource"
 at paint time on a live host -- the same class of defect
-``test_detail_beam_xaml.py::test_every_static_resource_reference_is_defined``
+``test_simple_beam_xaml.py::test_every_static_resource_reference_is_defined``
 already guards for every other ``StaticResource`` in the file).
 """
 
@@ -19,8 +19,8 @@ from rft.ui.sketch_palette import STYLE_BRUSH_KEYS, brush_key_for_style
 
 XAML_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension", "RFT Beam Detailing.tab",
-    "Detail Beam.panel", "Detail Beam.pushbutton", "DetailBeamWindow.xaml",
+    "SimpleBeamRFT.extension", "RFT-Tools.tab",
+    "Beams.panel", "Simple Beam.pushbutton", "SimpleBeamWindow.xaml",
 )
 
 
@@ -50,7 +50,7 @@ def test_every_mapped_brush_is_declared_in_the_xaml():
     missing = sorted(set(STYLE_BRUSH_KEYS.values()) - declared)
     assert not missing, (
         "these brush names are used by the sketch palette but never "
-        "declared with x:Key in DetailBeamWindow.xaml, which throws "
+        "declared with x:Key in SimpleBeamWindow.xaml, which throws "
         "'Cannot find resource' at paint time on a live host: %s" % missing
     )
 

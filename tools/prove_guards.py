@@ -30,18 +30,18 @@ import io
 import subprocess
 import sys
 
-SCRIPT = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
-          "Detail Beam.panel/Detail Beam.pushbutton/script.py")
-BUNDLE = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
-          "Detail Beam.panel/Detail Beam.pushbutton/bundle.yaml")
-XAML = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
-        "Detail Beam.panel/Detail Beam.pushbutton/DetailBeamWindow.xaml")
-PLAN = "RFTBeamDetailing.extension/lib/rft/core/plan.py"
-REPORT = "RFTBeamDetailing.extension/lib/rft/ui/report.py"
-GUARDS = "RFTBeamDetailing.extension/lib/rft/core/guards.py"
-SPACING = "RFTBeamDetailing.extension/lib/rft/core/spacing.py"
-SKETCH_PALETTE = "RFTBeamDetailing.extension/lib/rft/ui/sketch_palette.py"
-T = "tests/test_detail_beam_xaml.py::"
+SCRIPT = ("SimpleBeamRFT.extension/RFT-Tools.tab/"
+          "Beams.panel/Simple Beam.pushbutton/script.py")
+BUNDLE = ("SimpleBeamRFT.extension/RFT-Tools.tab/"
+          "Beams.panel/Simple Beam.pushbutton/bundle.yaml")
+XAML = ("SimpleBeamRFT.extension/RFT-Tools.tab/"
+        "Beams.panel/Simple Beam.pushbutton/SimpleBeamWindow.xaml")
+PLAN = "SimpleBeamRFT.extension/lib/rft/core/plan.py"
+REPORT = "SimpleBeamRFT.extension/lib/rft/ui/report.py"
+GUARDS = "SimpleBeamRFT.extension/lib/rft/core/guards.py"
+SPACING = "SimpleBeamRFT.extension/lib/rft/core/spacing.py"
+SKETCH_PALETTE = "SimpleBeamRFT.extension/lib/rft/ui/sketch_palette.py"
+T = "tests/test_simple_beam_xaml.py::"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
 CATCH_ANCHOR = ("        except Exception as ex:\n"
