@@ -294,6 +294,35 @@ CASES = [
      "                )\n",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the spacing gate alerting but not returning, so Place proceeds anyway"),
+
+    # A follow-up review on #61 found the guard above checks `gate.test`
+    # only, so an ENCLOSING `if` can be short-circuited by a constant
+    # instead: the whole preflight is skipped, and the gate's own test
+    # never even runs.
+    (SCRIPT, '        if "error" not in geometry:',
+     '        if False and "error" not in geometry:',
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the preflight's ENCLOSING if short-circuited by a constant"),
+
+    # And the same review found `return` can be buried under a nested
+    # `if False:` inside the gate: it is still reachable by `ast.walk`, so
+    # a check that only asks "is a Return present somewhere under here"
+    # passes against code that can never execute it.
+    (SCRIPT, "            if spacing_messages:\n"
+             "                forms.alert(\n"
+             '                    "\\n\\n".join(m.message for m in spacing_messages),\n'
+             '                    title="Section 6.2-6.4 spacing violation",\n'
+             "                )\n"
+             "                return\n",
+     "            if spacing_messages:\n"
+     "                if False:\n"
+     "                    forms.alert(\n"
+     '                        "\\n\\n".join(m.message for m in spacing_messages),\n'
+     '                        title="Section 6.2-6.4 spacing violation",\n'
+     "                    )\n"
+     "                    return\n",
+     T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
+     "the refusal's return buried under a nested if False, so it never runs"),
 ]
 
 

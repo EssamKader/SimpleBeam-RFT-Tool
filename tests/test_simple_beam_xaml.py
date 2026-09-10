@@ -980,14 +980,44 @@ def test_place_preflight_checks_spacing_before_the_transaction_opens():
         "the preflight's messages are never checked with `if %s:` -- "
         "computed and never consulted is the same as never computed" % target_name
     )
-    for gate in gates:
-        for child in ast.walk(gate.test):
-            value = getattr(child, "value", None)
-            assert not (isinstance(child, ast.Constant) and value in (False, 0, None)), (
-                "the spacing gate is short-circuited by a constant, so it "
-                "never refuses: %s" % ast.dump(gate.test)[:120]
+
+    # No `if` ANYWHERE inside on_place_click may be dead on arrival -- not
+    # only the spacing gate itself. A constant-false test on an ENCLOSING
+    # `if` (`if False and "error" not in geometry:`) leaves the gate's own
+    # `test` looking perfectly innocent while the whole preflight never
+    # runs; checking only `gate.test` (as this test once did) is blind to
+    # that. Only BOOLEAN-context operands are inspected -- `if self.beam is
+    # None:` is a legitimate comparison, and None there is data being
+    # compared, not a short-circuit -- so this descends through
+    # `BoolOp(And/Or)` only, not into `Compare`/`Call` subtrees.
+    def _boolop_operands(node):
+        if isinstance(node, ast.BoolOp):
+            operands = []
+            for value in node.values:
+                operands.extend(_boolop_operands(value))
+            return operands
+        return [node]
+
+    for if_node in ast.walk(method):
+        if not isinstance(if_node, ast.If):
+            continue
+        for operand in _boolop_operands(if_node.test):
+            value = getattr(operand, "value", None)
+            assert not (isinstance(operand, ast.Constant) and value in (False, 0, None)), (
+                "an `if` inside on_place_click is short-circuited by a "
+                "constant, so code beneath it can never run: %s"
+                % ast.dump(if_node.test)[:120]
             )
-        assert any(isinstance(n, ast.Return) for n in ast.walk(gate)), (
-            "the spacing gate must RETURN on a refusal, not fall through "
-            "to the transaction dispatch"
+
+    for gate in gates:
+        # The refusal's `return` must be a DIRECT statement in the gate's
+        # own body, not merely reachable by `ast.walk(gate)` -- a `return`
+        # nested under `if False:` inside the gate satisfies `ast.walk`
+        # but can never execute, which is exactly the second shape found
+        # in review: "refuse and return" means the return sits at the top
+        # level of the `if spacing_messages:` block, not buried deeper.
+        assert any(isinstance(n, ast.Return) for n in gate.body), (
+            "the spacing gate must RETURN directly in its body on a "
+            "refusal -- a `return` buried under a nested `if` inside the "
+            "gate is dead code, not a refusal"
         )
