@@ -43,6 +43,7 @@ SPACING = "RFT.lib/rft/core/spacing.py"
 SKETCH_PALETTE = "RFT.lib/rft/ui/sketch_palette.py"
 T = "tests/test_simple_beam_xaml.py::"
 WORKFLOW = ".github/workflows/tests.yml"
+VERSION_FILE = "SimpleBeamRFT.extension/VERSION"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
 CATCH_ANCHOR = ("        except Exception as ex:\n"
@@ -373,6 +374,27 @@ CASES = [
      "                return\n",
      T + "test_place_preflight_checks_spacing_before_the_transaction_opens",
      "the refusal's return buried under a nested if False, so it never runs"),
+
+    # The window has to name the build it is running. Without it, a
+    # candidate that does NOT contain the fix under test looks identical
+    # to one that does -- which cost a whole round trip during #61's
+    # testing.
+    (SCRIPT, 'self.Title = "{} -- {}".format(self.Title, _loaded_version())',
+     'pass  # title not stamped', 'tests/test_simple_beam_xaml.py::test_the_window_names_the_build_it_is_running',
+     "the window not naming its build"),
+
+    # The realistic drift, and why the guard asks WHAT the title is built
+    # from rather than merely that it is assigned: someone hard-codes the
+    # version and it silently stops matching the checkout.
+    (SCRIPT, '.format(self.Title, _loaded_version())',
+     '.format(self.Title, "v0.3.1-rc2")', 'tests/test_simple_beam_xaml.py::test_the_window_names_the_build_it_is_running',
+     "a hard-coded version in the window title"),
+
+    (XAML, 'Title="Simple Beam"', 'Title="Detail Beam"', 'tests/test_simple_beam_xaml.py::test_the_window_names_the_build_it_is_running',
+     "the pre-rc3 window title returning"),
+
+    (VERSION_FILE, "v0.3.1-rc2", "v0.3.0", 'tests/test_simple_beam_xaml.py::test_the_version_file_matches_the_newest_changelog_entry',
+     "VERSION bumped out of step with the changelog"),
 ]
 
 
