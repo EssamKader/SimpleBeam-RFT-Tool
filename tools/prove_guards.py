@@ -202,6 +202,21 @@ CASES = [
      "tests/test_ui_sketch_palette.py::"
      "test_every_mapped_brush_is_declared_in_the_xaml",
      "a brush name the XAML never declares with x:Key"),
+
+    # #62. The label width estimate and the drawn font size must be the
+    # same number: estimate small, draw large, and the clipped tails come
+    # straight back with nothing to say so.
+    (SCRIPT, "            text_block.FontSize = SKETCH_FONT_SIZE_PX",
+     "            text_block.FontSize = 14.0",
+     T + "test_the_label_size_estimate_uses_the_font_the_labels_are_drawn_in",
+     "the renderer drawing labels at a size it did not estimate"),
+
+    # And the placement itself must stay in the tested module rather than
+    # being inlined back into the renderer, where nothing can run it.
+    (SCRIPT, "place_labels(boxes, width_px, height_px)",
+     "boxes  # place_labels(boxes, width_px, height_px)",
+     T + "test_every_label_is_placed_through_the_tested_layout_module",
+     "label placement inlined back into the renderer"),
 ]
 
 
