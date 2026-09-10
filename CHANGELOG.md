@@ -6,9 +6,9 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.3.0-rc2` is a CANDIDATE, not a release.** rc1 added the live sketch
-and drew it illegibly; rc2 fixes the labels. Load it to test it; the
-checks are in its own entry below.
+**`v0.3.0-rc3` is a CANDIDATE, not a release.** rc1 added the live sketch,
+rc2 made its labels readable, rc3 renames the ribbon for expansion past
+beams. Load it to test it; the checks are in its own entry below.
 
 **`v0.2.1` is the last VERIFIED release.** Go back to it if the candidate
 misbehaves.
@@ -56,6 +56,86 @@ Layout follows pyRevit convention — `SimpleBeamRFT.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.0-rc3] — 2026-09-10
+
+Names only. No code path changed, no dimension changed, 459 tests and 26
+of 26 guards unmoved -- but the ribbon is now shaped for the walls and
+columns that may follow.
+
+### What Revit shows
+
+```
+RFT-Tools                 <- ribbon tab
+└── Beams                 <- panel
+    └── Simple Beam       <- button
+```
+
+| | before | after |
+|---|---|---|
+| repo | `rft-beam-detailing` | `SimpleBeam-RFT-Tool` |
+| extension | `RFTBeamDetailing` | `SimpleBeamRFT` |
+| tab | `RFT Beam Detailing` | `RFT-Tools` |
+| panel | `Detail Beam` | `Beams` |
+| button | `Detail Beam` | `Simple Beam` |
+
+### The naming rule
+
+**The tab names the domain, the panel names the element, the button names
+the case.**
+
+pyRevit merges ribbon tabs BY TITLE across extensions. So a future wall or
+column tool can ship as its own extension -- its own repo, even -- declare
+the same `RFT-Tools` title, and appear on this same tab beside the beam
+tools. No tab per element, and no requirement that every element live in
+one repository, which matters because this repo is deliberately named for
+the beam case.
+
+The panel is `Beams` and not `Simple Beam` for the same reason one level
+down: a continuous-span beam tool later belongs NEXT TO Simple Beam on the
+Beams panel, not on a panel of its own.
+
+### Also renamed
+
+The window is `SimpleBeamWindow` in `SimpleBeamWindow.xaml`, guarded by
+`tests/test_simple_beam_xaml.py`. Leaving `DetailBeam` internals behind a
+button labelled "Simple Beam" is the kind of drift that costs an hour six
+months from now.
+
+### The tooltip was three releases out of date
+
+It still described #46 in flight: "five tabs", "the Place button currently
+refuses", "three pushbuttons STILL ON THE RIBBON... use them meanwhile".
+None of that has been true since `v0.2.0`, and the three pushbuttons were
+deleted by #55. It now says what the tool does and states the single-span
+scope.
+
+### What was deliberately NOT rewritten
+
+`CHANGELOG.md`'s release entries. The "Delivery model" section above is an
+instruction and had to follow the rename; every entry below records what
+was true at the time. A changelog that edits its own history is worth
+nothing.
+
+### Installing this one
+
+The registered pyRevit search path is the folder CONTAINING the
+`.extension`, so it has not changed -- no re-registration, just a reload.
+
+One caution: checking out this tag deletes the old
+`RFTBeamDetailing.extension` folder, but a stray untracked file inside it
+(a `__pycache__`, say) would leave the folder present, and pyRevit would
+then try to load TWO extensions. Clean the worktree as part of the
+checkout.
+
+### Still true from rc1 and rc2
+
+Every WPF call remains unverifiable without a host, and **Place still does
+not refuse on a section 6.2-6.4 spacing violation** (issue #61) -- the
+report prints "REFUSED" and the bars go in anyway. That one affects steel
+rather than pixels, and it is the most consequential thing still open.
+
+---
 
 ## [v0.3.0-rc2] — 2026-09-10
 
