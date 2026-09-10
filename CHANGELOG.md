@@ -6,13 +6,12 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.3.0-rc4` is a CANDIDATE, not a release.** rc1 added the live sketch,
-rc2 made its labels readable, rc3 renamed the ribbon for expansion past
-beams, rc4 remembers each project's inputs without remembering its
-intent. Load it to test it; the checks are in its own entry below.
+**`v0.3.0` is the current VERIFIED release** -- confirmed on a live host
+by the project owner. It is `v0.3.0-rc4`'s tree: the live sketch, readable
+labels, the `RFT-Tools` ribbon, and per-project persistence.
 
-**`v0.2.1` is the last VERIFIED release.** Go back to it if the candidate
-misbehaves.
+**`v0.2.1` is the previous verified release.** Go back to it only if
+`v0.3.0` misbehaves.
 The single `Detail Beam` window opens, picks a beam, reports its plan and
 places main bars, stirrups and crack bars in a live Revit 2024 session --
 confirmed by the project owner on `v0.2.0` and again on `v0.2.1` after the
@@ -57,6 +56,61 @@ Layout follows pyRevit convention — `SimpleBeamRFT.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.0] — 2026-09-10
+
+**VERIFIED on a live host.** The project owner loaded `v0.3.0-rc4` in a
+Revit session and confirmed it. This tag is that tree: the extension is
+byte-identical to `v0.3.0-rc4` (`git diff v0.3.0-rc4 v0.3.0 --
+SimpleBeamRFT.extension` is empty; the commits between them touch only
+`docs/`, CI and the test tooling).
+
+Four candidates went into it. What `v0.2.1` did not have:
+
+- **A live sketch** (rc1) — cross-section and longitudinal elevation,
+  following the active tab, drawn from the same plan the placer uses
+  rather than from a second computation.
+- **Readable labels** (rc2) — pixel-space placement with clamping and
+  overlap pushing. At the owner's real canvas width the longest label
+  went from 105 characters to 20, with nothing clipped.
+- **A ribbon shaped for expansion** (rc3) — `RFT-Tools` / `Beams` /
+  `Simple Beam`, on the rule that the tab names the domain, the panel
+  names the element and the button names the case. pyRevit merges tabs by
+  title, so a future column or wall tool joins this tab from its own
+  extension.
+- **Per-project persistence** (rc4) — every dimension and option is
+  remembered per project; the two main-bar counts, the stirrup hook type
+  and the crack bar type are deliberately WITHHELD, so Place always opens
+  disabled on a fresh beam. Remembering values must not remember intent.
+
+### What is still open against this release
+
+**Place does not refuse on a section 6.2-6.4 spacing violation**
+(issue #61). The report prints REFUSED and the bars go in anyway. A
+regression against `v0.1.0` and the most consequential thing outstanding,
+because it concerns steel rather than pixels.
+
+**Spacer bars are never modelled** (issue #63). `Ø_spacer` is used as a
+layer dimension and drawn on the sketch, but no spacer bar is placed and
+there is no spacer bar-type picker, contrary to amendment A42's five
+roles. Found by the project owner on this release.
+
+Single-span only, as always -- section 9 item 2 remains deferred.
+
+### CI was red for two of the four candidates
+
+The rc3 rename moved the extension, tab, panel and pushbutton; the
+`compileall` step in `.github/workflows/tests.yml` still named the old
+paths, so every push from rc3 onward failed while all 485 tests passed.
+The step that failed is the one that catches a syntax error in the file no
+test can import, so for rc3 and rc4 it was not failing -- it was covering
+nothing. Both paths compile; verified directly against this tree.
+
+Fixed after rc4, with a guard that asks the FILESYSTEM whether each path
+CI names exists, and a prover case that reapplies the rename to prove the
+guard fails. 486 tests, 30 of 30 guards.
+
+---
 
 ## [v0.3.0-rc4] — 2026-09-10
 
