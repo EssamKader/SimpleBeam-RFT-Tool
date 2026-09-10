@@ -83,7 +83,16 @@ CASES = [
      "test_report_and_placement_both_use_the_shared_plan",
      "report recomputing ONE of its plan calls by hand"),
 
-    (SCRIPT, "core_plan.crack_plan(", "hand_rolled_crack_plan(",
+    # #49 (U5) added a SECOND ``core_plan.crack_plan(`` call site in this
+    # file (``_sketch_crack_plan``, the live sketch's own best-effort
+    # crack plan), earlier in the file than the placer's. A bare
+    # single-occurrence replace of "core_plan.crack_plan(" now hits that
+    # one instead, leaving the placer's call untouched and this case
+    # silently unproven -- so the anchor is widened to text unique to the
+    # PLACER's call site (``_build_placement_plans``'s own local variable
+    # names), which the sketch's call does not share.
+    (SCRIPT, 'crack = core_plan.crack_plan(\n                h_mm, b_mm, cover_side_mm, stirrup_dia_mm,',
+     'crack = hand_rolled_crack_plan(\n                h_mm, b_mm, cover_side_mm, stirrup_dia_mm,',
      "test_report_and_placement_both_use_the_shared_plan",
      "placer recomputing the crack plan by hand"),
 
