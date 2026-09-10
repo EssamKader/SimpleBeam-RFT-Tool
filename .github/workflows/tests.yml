@@ -1,0 +1,61 @@
+# The tests and the guards, on every push.
+#
+# WHY THE GUARDS RUN HERE TOO, and not just pytest.
+#
+# Twelve of this repo's checks read source code as TEXT, because the
+# pyRevit script imports `pyrevit` and cannot be imported under CPython at
+# all -- no test can evaluate it. A text check that matches nothing passes
+# silently, and two of them did exactly that: a regex word boundary had
+# been written into the file as a literal backspace byte, so the pattern
+# matched nothing and the test passed against the very defect it was
+# written for.
+#
+# `tools/prove_guards.py` reintroduces each guard's own defect and requires
+# the guard to fail. A green pytest run is not evidence that those guards
+# still work; this job is.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.11 for CI; the PRODUCTION runtime is IronPython 2.7 inside
+          # Revit, which no runner can host. tests/test_ironpython_compat.py
+          # is what enforces the 2.7 constraints (PEP 263 cookie, no
+          # f-strings, no Python-3-only stdlib) -- the version here only
+          # has to run the suite.
+          python-version: "3.11"
+
+      # pytest only. There is deliberately no requirements file: the
+      # library under test imports nothing outside the standard library
+      # plus the Revit API, and the Revit API is faked in
+      # tests/fake_revit_api.py.
+      - run: python -m pip install --upgrade pip pytest
+
+      - name: pytest
+        run: python -m pytest -q
+
+      - name: prove the text guards by mutation
+        # Needs a clean tree: the prover restores each mutation with
+        # `git checkout --` and refuses to touch a file with uncommitted
+        # changes, since restoring one would discard real work. A fresh
+        # checkout satisfies that by construction.
+        run: python tools/prove_guards.py
+
+      - name: every module compiles
+        # Cheap, and it catches the one class of failure a text-only guard
+        # cannot: a syntax error in the file no test can import.
+        run: |
+          python -m compileall -q RFTBeamDetailing.extension/lib
+          python -m py_compile "RFTBeamDetailing.extension/RFT Beam Detailing.tab/Detail Beam.panel/Detail Beam.pushbutton/script.py"
