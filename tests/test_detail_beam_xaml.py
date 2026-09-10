@@ -320,6 +320,25 @@ def _report_module_source():
     return io.open(REPORT_PATH, encoding="utf-8").read()
 
 
+def _code_only(body):
+    """A method's source with comments stripped.
+
+    A guard that greps for a call is satisfied by a COMMENT mentioning
+    that call -- which is not a hypothetical: the mutation written to
+    prove the guard below replaced the real call with
+    ``boxes  # place_labels(...)``, and the guard passed. The prover
+    reported it MISSED, which is the only reason it was noticed.
+
+    Crude on purpose: it does not parse strings, so a "#" inside a string
+    literal would truncate that line. That is acceptable for the "is this
+    call present in the code" question, and erring toward seeing LESS
+    code makes the guards stricter, never laxer.
+    """
+    return "\n".join(
+        line.split("#", 1)[0] for line in body.splitlines()
+    )
+
+
 def _method_body(name):
     text = io.open(SCRIPT_PATH, encoding="utf-8").read()
     start = text.index("    def {}(self".format(name))
@@ -562,7 +581,10 @@ def test_every_label_is_placed_through_the_tested_layout_module():
     re-implemented inline in the renderer, where nothing can execute them:
     that is the whole reason they were put in an importable module.
     """
-    body = _method_body("_draw_shapes")
+    # Comments stripped: the first version of this check was satisfied by
+    # a comment naming the call, which the prover caught by MISSING its
+    # own mutation. A guard that a comment can satisfy is not a guard.
+    body = _code_only(_method_body("_draw_shapes"))
     assert "place_labels(" in body, (
         "labels must be positioned by rft.ui.sketch_layout.place_labels, "
         "which has tests, not by arithmetic inlined here"
