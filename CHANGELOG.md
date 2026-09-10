@@ -10,12 +10,15 @@ to load. Only a tagged commit should be loaded into a Revit session, never
 by the project owner. It is `v0.3.0-rc4`'s tree: the live sketch, readable
 labels, the `RFT-Tools` ribbon, and per-project persistence.
 
-**`v0.3.1-rc1` is a CANDIDATE on top of it**, and a structural one: the
-library moved to `RFT.lib` so a second element can import it (#64).
-Nothing about the tool behaves differently -- but how pyRevit FINDS the
-library changed, which the test suite cannot verify. Read its install
-note before loading it; registering it beside `v0.3.0` is the one way to
-break it.
+**`v0.3.1-rc2` is the CANDIDATE to test**, and it supersedes `rc1`, which
+was never loaded on a host. It carries rc1's library move to `RFT.lib`
+(#64) plus #61 -- Place now REFUSES on a section 6.2-6.4 spacing
+violation instead of printing REFUSED and placing the bars anyway.
+
+The window title now names the build: check it says `v0.3.1-rc2` before
+trusting anything else you see. Read its install note first --
+registering it beside `v0.3.0` gives you two buttons both called Simple
+Beam, which is the one way to make this confusing.
 
 **`v0.2.1` is the previous verified release.** Go back to it only if
 `v0.3.0` misbehaves.
@@ -79,6 +82,165 @@ shared one. Both properties are guarded by
 
 As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.3.1-rc2] — 2026-09-10
+
+**Contains everything `v0.3.1-rc1` did, plus #61.** rc1 was never loaded
+on a host, so nothing in it has been verified; test this instead of it.
+
+496 tests, 38 of 38 guards proven.
+
+### Place refuses on a section 6.2-6.4 spacing violation (#61)
+
+The regression this closes: the Review report printed
+`REFUSED (section 6.2-6.4)` and Place placed the bars anyway. `v0.1.0`'s
+`Place Main Bars` validated both faces and stopped; the single window
+never called `validate_face_spacing` at all. The tool said REFUSED and
+then did it, which is worse than either refusing or staying silent,
+because the report read like an enforcement it was not.
+
+Two guards are now consulted before any transaction opens:
+
+- **achieved clear spacing below the governing minimum** (section 6.4,
+  A43/A44)
+- **section 6.3 option 1 selected with more than one layer** (A36) -- a
+  stated contradiction, never silently resolved as option 2
+
+Both faces are checked independently, so a violation on one still reports
+the other. A requested face with **no section 6.3 option selected** also
+refuses: the check cannot run, and "could not check" is not "passed".
+Defaulting it to option 2 would be the same silent resolution A44
+forbids.
+
+The refusal quotes the guard's own text, unmodified. On the 300x900 beam
+with R10 stirrups and T16 bottom bars, 8 bars in 1 layer:
+
+> Bottom face: REFUSED -- layer 1 (8 bars) achieves 14.6 mm clear
+> spacing, below the governing minimum of 50.0 mm (rev 2 section 6.4,
+> A43's corrected datum). Both section 6.3 options refuse on this
+> violation (A44 supersedes A27's Option 2 auto-stacking). At most 4 bars
+> per layer satisfy this minimum; your 8 bars in this face would need 2
+> layers at that count (reporting only, per A44 -- the tool never
+> re-splits the bars you stated; enter the count and layers yourself).
+
+**Nothing is placed on a refusal** -- not the stirrups, not the crack
+bars, not the compliant face. The project owner was asked whether a
+violation should instead skip the offending face and place the rest with
+a warning, and chose to keep the hard refusal: on a simple span the
+bottom face is the tension face, and a beam that looks detailed while
+missing its bottom steel is worse than one that was refused.
+
+### The fix is one computation, not a second call site
+
+`rft.core.plan.face_spacing_check_mm` wraps `governing_min_spacing_mm`
+then `validate_face_spacing`, and BOTH the Review report and the
+placement preflight call it. Adding a second derivation to the preflight
+would have re-created the very fault being fixed -- the defect was one
+computation having become two when #46/#50 split "what to report" from
+"what to place". `rft.core.spacing` is untouched: it still owns every
+formula and every message string.
+
+The report's output was verified unchanged across **1440 configurations**
+-- two beam sections, options 1/2/unselected, bar counts including
+non-numeric text, one to six layers, blank and garbage aggregate sizes,
+override-with-aggregate -- byte-identical, every refusal branch included.
+
+### The guard took three rounds, and that is the point
+
+`script.py` imports `pyrevit` and cannot be imported under CPython, so no
+test can execute the preflight; the only possible guard is structural.
+Three rounds of review found seven ways to disable the check while the
+guard still passed:
+
+| mutation | round found |
+|---|---|
+| the gate short-circuited by `if False and ...` | 1 (by the prover) |
+| the preflight's ENCLOSING `if` short-circuited | 2 |
+| the refusal's `return` buried under a nested `if False:` | 2 |
+| the same, with a non-constant always-false test (`if 1 == 2:`) | 3 |
+| the enclosing geometry check INVERTED (`in` for `not in`) | 3 |
+| the whole preflight re-nested in an always-false condition | 3 |
+| the call deleted outright | 1 |
+
+The third round stopped patching the guard and changed the CODE: the
+preflight was hoisted out of its enclosing conditional and is now a
+direct statement of `on_place_click`'s body, refusing on a geometry error
+instead of skipping past it. Whether an arbitrary enclosing condition can
+ever be true is undecidable from the AST, so a guard that must reason
+about reachability always loses; with no enclosing condition there is
+nothing left to attack, and the guard asserts a property that is total.
+All seven mutations are in `tools/prove_guards.py`.
+
+### The window now names the build it is running
+
+The title read **"Detail Beam"** in every build -- `v0.3.0-rc3` renamed
+the class, the file, the tab, the panel and the button, and missed the
+title -- and nothing anywhere named the version. So a candidate that did
+NOT contain the fix under test looked exactly like one that did, and a
+full round trip was spent on "it does not warn" against a build in which
+the warning did not yet exist. That is a testing defect, and it was ours.
+
+The title is now `Simple Beam -- <version>`, read from a `VERSION` file
+at the extension root. Deployment is one worktree per tag, so which build
+is loaded is a property of the checkout and nothing the code can compute.
+`VERSION` is pinned to the newest `CHANGELOG.md` heading by a test, so a
+version cannot be bumped in one place without the other. A raw clone
+rather than a tagged worktree reads `Simple Beam -- unversioned build`,
+which is exactly the state worth seeing.
+
+### Installing this one -- the same caution as rc1, and it matters more now
+
+**Forget the old path BEFORE adding this one**, and prefer a Revit
+restart over a reload:
+
+```
+pyrevit extensions paths forget "<somewhere>/rft-v0.3.0"
+git worktree add <somewhere>/rft-v0.3.1-rc2 v0.3.1-rc2
+pyrevit extensions paths add <somewhere>/rft-v0.3.1-rc2
+```
+
+Two registered paths means pyRevit merges the tab and panel BY TITLE and
+you get **two buttons both named Simple Beam**, with no way to tell which
+one you clicked -- and the older worktree's
+`SimpleBeamRFT.extension/lib/rft` takes precedence for its own
+extension, so the load can be mixed. `engine: persistent: true` can also
+keep stale modules alive across a reload, which a restart rules out.
+
+Check the window title first. If it does not say `v0.3.1-rc2`, nothing
+else you observe is about this candidate.
+
+### What to test
+
+On a 300x900 beam, side cover 25, R10 stirrups, T16 bottom bars:
+
+| bottom bars | layers | option | D_agg | expected |
+|---|---|---|---|---|
+| 4 | 1 | 2 | blank | places normally |
+| 8 | 1 | 2 | blank | REFUSES, quoting 14.6 vs 50.0 mm |
+| 6 | 2 | 1 | 20 | REFUSES, option 1 with 2 layers |
+| 5 | 1 | 2 | 20 | places normally |
+
+On each refusal, check the **model tree**, not just the dialog: no rebar
+at all should appear, including stirrups and crack bars.
+
+Also worth a look, since rc1 was never tested: the tab, panel and button
+still load at all (the library moved to `RFT.lib` in #64), and the live
+sketch behaves as it did on `v0.3.0` -- its three modules are
+byte-identical to that release, so any difference is a load problem
+rather than a code change.
+
+### Still open
+
+**#63** -- spacer bars are never modelled. `Ø_spacer` is used as a layer
+dimension and drawn on the sketch, but no bar is placed and there is no
+spacer bar-type picker, contrary to A42's five roles. Deferred by the
+project owner.
+
+Where the shared library is VERSIONED once a second element exists is
+still undecided (#64 left it in this repo by default, not by decision).
+Single-span only.
+
+---
 
 ## [v0.3.1-rc1] — 2026-09-10
 

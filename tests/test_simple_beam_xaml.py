@@ -53,6 +53,10 @@ NON_XAML_SELF_ATTRS = {
     # this check reads source text, not live attributes, which is the
     # trade for being able to run it at all without a Revit host.
     "_api_call_in_flight", "Dispatcher",
+    # Window.Title is an inherited WPF member, like Dispatcher above:
+    # the loaded VERSION is appended to it in __init__ so the build
+    # under test is visible in the window itself.
+    "Title",
     # INHERITED WPFWindow members. ``_script_method_names()`` only finds
     # methods DEFINED in this file, so anything the base class provides
     # has to be named here: Dispatcher above is a property, set_icon is a
@@ -1075,4 +1079,86 @@ def test_place_preflight_checks_spacing_before_the_transaction_opens():
         "the spacing gate must RETURN directly in its body on a "
         "refusal -- a `return` buried under a nested `if` inside the "
         "gate is dead code, not a refusal"
+    )
+
+
+def test_the_window_names_the_build_it_is_running():
+    """The loaded version must be visible in the window (#61's test cycle).
+
+    Every build's window title read "Detail Beam" -- the `v0.3.0-rc3`
+    rename renamed the class, the file, the tab, the panel and the button
+    and missed the title -- and nothing anywhere named the version. A
+    candidate that did NOT contain the fix under test was therefore
+    indistinguishable from one that did, and a whole round trip was spent
+    on "it does not warn" against a build in which the warning did not yet
+    exist.
+
+    Three things are checked, because any one of them alone leaves that
+    hole open: the XAML no longer carries the old name, the title is
+    actually reassigned in code, and what it is reassigned from is the
+    VERSION file rather than a literal someone has to remember to edit.
+    """
+    import ast
+
+    xaml = io.open(XAML_PATH, encoding="utf-8").read()
+    assert 'Title="Detail Beam"' not in xaml, (
+        "the window title is still the pre-rc3 name"
+    )
+
+    source = io.open(SCRIPT_PATH, encoding="utf-8").read()
+    tree = ast.parse(source)
+
+    assigns = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Attribute) and t.attr == "Title"
+                for t in node.targets)
+    ]
+    assert assigns, (
+        "nothing assigns self.Title, so the window cannot name its build"
+    )
+
+    called = set()
+    for assign in assigns:
+        for child in ast.walk(assign.value):
+            if isinstance(child, ast.Call):
+                if isinstance(child.func, ast.Name):
+                    called.add(child.func.id)
+                elif isinstance(child.func, ast.Attribute):
+                    called.add(child.func.attr)
+    assert "_loaded_version" in called, (
+        "the title is built without calling _loaded_version, so it names a "
+        "version someone has to remember to edit by hand: %s" % sorted(called)
+    )
+
+
+def test_the_version_file_matches_the_newest_changelog_entry():
+    """`VERSION` is what the window shows; the newest `CHANGELOG.md`
+    heading is what the release actually is. They must agree.
+
+    This is the guard that makes the title trustworthy. Cutting a tag
+    means adding a CHANGELOG entry, so pinning VERSION to that entry means
+    a bump cannot be recorded without the loaded build's title following
+    it -- and cannot be written into VERSION alone either.
+    """
+    import re
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    version_path = os.path.join(repo_root, "SimpleBeamRFT.extension", "VERSION")
+    assert os.path.isfile(version_path), (
+        "SimpleBeamRFT.extension/VERSION is missing -- the window would "
+        "report every build as unversioned"
+    )
+    version = io.open(version_path, encoding="utf-8").read().strip()
+    assert version, "VERSION is empty"
+
+    changelog = io.open(
+        os.path.join(repo_root, "CHANGELOG.md"), encoding="utf-8").read()
+    headings = re.findall(r"^## \[([^\]]+)\]", changelog, re.M)
+    assert headings, "no release headings found in CHANGELOG.md"
+
+    assert version == headings[0], (
+        "VERSION says %r but the newest CHANGELOG.md entry is %r -- one was "
+        "bumped without the other, so the window would name the wrong build"
+        % (version, headings[0])
     )

@@ -271,6 +271,34 @@ class BeamMaterialsSelection(object):
         self.stirrup_hook_angle_deg = None
 
 
+def _loaded_version():
+    """The version string of the build that is actually loaded, read from
+    the ``VERSION`` file at the extension root.
+
+    Deployment is one git worktree per tag, so which build is running is a
+    property of the CHECKOUT, not of anything the code can compute. The
+    file is written as part of cutting a tag and its contents are pinned
+    to the newest ``CHANGELOG.md`` entry by
+    ``tests/test_simple_beam_xaml.py``, so bumping one without the other
+    fails before it can ship.
+
+    Four ``dirname``s: this file sits in
+    ``<ext>/RFT-Tools.tab/Beams.panel/Simple Beam.pushbutton/``. Returns
+    ``"unversioned build"`` on any failure -- a missing or unreadable
+    VERSION means someone is running a raw clone rather than a tagged
+    worktree, which is exactly the situation worth SEEING in the title
+    rather than failing the load over.
+    """
+    try:
+        extension_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+        with open(os.path.join(extension_root, "VERSION")) as version_file:
+            version = version_file.read().strip()
+        return version or "unversioned build"
+    except Exception:
+        return "unversioned build"
+
+
 def _end_support(document, point, axis, beam_id):
     """Detect the support at one beam end (rev 2 section 2.4, A9). A free/
     cantilever end returns (None, None) -- the unsupported path (section
@@ -375,6 +403,20 @@ class SimpleBeamWindow(forms.WPFWindow):
         # EXEC_PARAMS.command_path, the folder this script sits in --
         # confirmed by the #42 spike, not re-derived here.
         forms.WPFWindow.__init__(self, "SimpleBeamWindow.xaml")
+
+        # #61's test cycle: the loaded build was INVISIBLE. The window
+        # title read "Detail Beam" on every version (the rc3 rename
+        # missed it), nothing anywhere named the version, and a candidate
+        # that did not contain the fix under test looked exactly like one
+        # that did -- which cost a whole round trip of "it does not warn"
+        # against a build in which the warning did not yet exist.
+        #
+        # Appended in code rather than written into the XAML so that the
+        # XAML stays the same file in every build and only this one line
+        # varies. Degrades to a named "unversioned" state rather than
+        # raising: a title is never worth failing a load over, and an
+        # unversioned build is itself worth seeing.
+        self.Title = "{} -- {}".format(self.Title, _loaded_version())
 
         self.beam = None
         self.host_data = None
