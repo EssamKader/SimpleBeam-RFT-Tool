@@ -260,6 +260,16 @@ CASES = [
      "compileall -q SimpleBeamRFT.extension/lib",
      "tests/test_ironpython_compat.py::test_every_path_the_ci_workflow_names_exists",
      "a CI path left behind by a rename"),
+
+    # The other direction, and it is not redundant: the mutation above
+    # produces a token containing ".extension", which the guard's
+    # predicate matched from the start. #64 introduced a path that matches
+    # NONE of the original patterns -- RFT.lib is not a .py, not a .yml
+    # and has no ".extension" in it -- so until the predicate learned
+    # ".lib" this case would have been MISSED while the one above passed.
+    (WORKFLOW, "compileall -q RFT.lib", "compileall -q RFTlib",
+     "tests/test_ironpython_compat.py::test_every_path_the_ci_workflow_names_exists",
+     "the shared library path itself mistyped"),
 ]
 
 
