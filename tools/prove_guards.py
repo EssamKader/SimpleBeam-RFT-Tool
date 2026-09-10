@@ -36,6 +36,8 @@ BUNDLE = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
           "Detail Beam.panel/Detail Beam.pushbutton/bundle.yaml")
 XAML = ("RFTBeamDetailing.extension/RFT Beam Detailing.tab/"
         "Detail Beam.panel/Detail Beam.pushbutton/DetailBeamWindow.xaml")
+PLAN = "RFTBeamDetailing.extension/lib/rft/core/plan.py"
+REPORT = "RFTBeamDetailing.extension/lib/rft/ui/report.py"
 T = "tests/test_detail_beam_xaml.py::"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
@@ -70,7 +72,11 @@ CASES = [
      "test_modeless_window_declares_a_persistent_engine",
      "no persistent engine (the rc2 live failure)"),
 
-    (SCRIPT, "core_plan.face_layer_plans(", "hand_rolled_layer_offsets(",
+    # The report moved to rft/ui/report.py, so this case follows it there.
+    # The prover reported ANCHOR MISSING rather than passing, which is the
+    # behaviour that matters: a case whose anchor has moved must not read
+    # as proven.
+    (REPORT, "core_plan.face_layer_plans(", "hand_rolled_layer_offsets(",
      "test_report_and_placement_both_use_the_shared_plan",
      "report recomputing ONE of its plan calls by hand"),
 
@@ -105,6 +111,36 @@ CASES = [
     (SCRIPT, "self._support_detection = None\n        self.beam_status_tb.Text", "        self.beam_status_tb.Text",
      "test_every_beam_scoped_attribute_is_cleared_on_pick",
      "cached supports surviving a re-pick"),
+
+    # The report's own half of the shared-plan rule. Its stirrup and crack
+    # sections recomputed everything for three releases, and the guard
+    # could not see it because the PLACER's calls satisfied the check.
+    (REPORT, "core_plan.stirrup_plan(", "hand_rolled_stirrup_zones(",
+     "test_report_and_placement_both_use_the_shared_plan",
+     "report recomputing the stirrup zones by hand"),
+
+    (REPORT, "core_plan.crack_plan(", "hand_rolled_crack_layers(",
+     "test_report_and_placement_both_use_the_shared_plan",
+     "report recomputing the crack plan by hand"),
+
+    # NOT text guards -- ordinary tests over an importable module. Proven
+    # here anyway, because a re-typed constant is the one kind of defect
+    # that arrives looking exactly like correct code, and this one shipped.
+    (PLAN, "ZONE_LAYOUT_FLAGS = ZONE_LAYOUT_FLAGS",
+     'ZONE_LAYOUT_FLAGS = {\n    "zone1": (True, True),\n'
+     '    "zone2": (False, True),\n    "zone3": (False, True),\n}',
+     "tests/test_core_plan.py::"
+     "test_the_zone_layout_flags_are_the_tested_ones_not_a_second_copy",
+     "plan.py holding its own copy of the zone flags again"),
+
+    # The same mutation with today's CORRECT values: a duplicate that
+    # agrees is still a duplicate, and this is the one that would slip
+    # past a values-only check.
+    (PLAN, "ZONE_LAYOUT_FLAGS = ZONE_LAYOUT_FLAGS",
+     'ZONE_LAYOUT_FLAGS = {\n    "zone1": (True, True),\n'
+     '    "zone2": (False, False),\n    "zone3": (True, True),\n}',
+     "tests/test_core_plan.py::test_only_one_module_defines_the_zone_layout_flags",
+     "a second copy of the flags, with the right values (today)"),
 ]
 
 
@@ -144,7 +180,10 @@ def main():
         try:
             io.open(path, "w", encoding="utf-8", newline="\n").write(
                 original.replace(find, replace, 1))
-            rc = subprocess.call(["python", "-m", "pytest", T + test, "-q"],
+            # A case may name a fully qualified node ("path::test") when
+            # its test lives outside the XAML suite; otherwise T applies.
+            node = test if "::" in test else T + test
+            rc = subprocess.call(["python", "-m", "pytest", node, "-q"],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         finally:
             _git("checkout", "--", path)

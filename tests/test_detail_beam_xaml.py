@@ -490,7 +490,17 @@ def test_report_and_placement_both_use_the_shared_plan():
         # tests pin the report's OUTPUT, and identical output is exactly
         # what a hand-rolled second computation produces right up until
         # the day it does not.
-        (_report_module_source(), "rft/ui/report.py", ("face_layer_plans", "end_plan")),
+        (_report_module_source(), "rft/ui/report.py", (
+            "face_layer_plans", "end_plan",
+            # The stirrup and crack sections recomputed their zones,
+            # counts, spacings and every bar position for three releases.
+            # This check could not see it: the PLACER's calls to
+            # stirrup_plan and crack_plan satisfied the requirement on
+            # their own, because the requirement was written per-CALL and
+            # not per-CONSUMER. It is now stated for both consumers, which
+            # is what "the report formats the plan" actually means.
+            "stirrup_plan", "crack_plan", "innermost_layer_offset_mm",
+        )),
     )
     for body, where, calls in required:
         for call in calls:
