@@ -530,6 +530,46 @@ def test_report_and_placement_both_use_the_shared_plan():
     )
 
 
+def test_the_label_size_estimate_uses_the_font_the_labels_are_drawn_in():
+    """#62. rft.ui.sketch_layout keeps labels inside the canvas by
+    estimating each one's WIDTH from its length and the font size. If the
+    renderer estimates at one size and draws at another, the estimate is
+    wrong by that ratio and the clipping this fixed comes straight back --
+    silently, since a too-small estimate simply lets the tail hang past
+    the edge again.
+
+    One constant, passed to the estimator AND set on the TextBlock.
+    """
+    body = _method_body("_draw_shapes")
+    assert "estimate_text_size_px(" in body
+    assert "SKETCH_FONT_SIZE_PX)" in body or "SKETCH_FONT_SIZE_PX," in body, (
+        "the label width estimate must be given the same font size the "
+        "labels are drawn in, not a literal"
+    )
+    assert "text_block.FontSize = SKETCH_FONT_SIZE_PX" in body, (
+        "the TextBlock must be set from the same constant the estimate "
+        "uses -- a literal here is how the two drift apart"
+    )
+    # And no second opinion about the size anywhere in that method.
+    assert "FontSize = 1" not in body, (
+        "a literal font size is set in _draw_shapes; use "
+        "SKETCH_FONT_SIZE_PX so the estimate cannot disagree with the draw"
+    )
+
+
+def test_every_label_is_placed_through_the_tested_layout_module():
+    """The clamping and de-collision are the fix for #62. They must not be
+    re-implemented inline in the renderer, where nothing can execute them:
+    that is the whole reason they were put in an importable module.
+    """
+    body = _method_body("_draw_shapes")
+    assert "place_labels(" in body, (
+        "labels must be positioned by rft.ui.sketch_layout.place_labels, "
+        "which has tests, not by arithmetic inlined here"
+    )
+    assert "LabelBox(" in body
+
+
 def test_the_support_detection_dict_has_exactly_one_writer():
     """#49's review finding, guarded.
 

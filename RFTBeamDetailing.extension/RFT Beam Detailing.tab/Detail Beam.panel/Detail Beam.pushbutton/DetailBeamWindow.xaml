@@ -324,7 +324,7 @@
  recompute (the numbers do not change, only cx/cy/s do). -->
                         <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas x:Name="main_bars_sketch_canvas" Height="260" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <Canvas x:Name="main_bars_sketch_canvas" Height="420" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
                                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Live cross-section: every dimension comes from rft.core (A48). Stirrup stations and hook fillets elsewhere in this tool are schematic; this section view has neither, see the Stirrups tab."/>
                             </StackPanel>
                         </Border>
@@ -371,7 +371,7 @@
  set's own layout and are never predicted here (A48/A49). -->
                         <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas x:Name="stirrups_sketch_canvas" Height="220" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <Canvas x:Name="stirrups_sketch_canvas" Height="260" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
                                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="Live elevation: zone boundaries, counts and spacing are exact (rft.core); individual stirrup stations and hook bend arcs are drawn schematic, labelled so on the drawing, because Revit's own rebar set and bar type own that geometry (A48/A49)."/>
                             </StackPanel>
                         </Border>
@@ -406,7 +406,7 @@
  objects the Review report and the placer use (A48/#56). -->
                         <Border Margin="0,14,0,0" Padding="10" Background="{StaticResource SurfaceTint}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1" HorizontalAlignment="Stretch">
                             <StackPanel>
-                                <Canvas x:Name="crack_bars_sketch_canvas" Height="260" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
+                                <Canvas x:Name="crack_bars_sketch_canvas" Height="420" ClipToBounds="True" Background="{StaticResource SurfaceWhite}"/>
                                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource InkMuted}" Text="H_avail is measured between the innermost main-bar layers, not between the concrete faces (A26) -- both faces need a bar type and a layer count before crack bars, or this drawing, can show anything here."/>
                             </StackPanel>
                         </Border>

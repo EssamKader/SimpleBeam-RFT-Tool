@@ -142,6 +142,11 @@ from rft.ui import derivation as ui_derivation
 from rft.ui import inputs as ui_inputs
 from rft.ui import report as ui_report
 from rft.ui import sketch as ui_sketch
+from rft.ui.sketch_layout import (
+    LabelBox,
+    estimate_text_size_px,
+    place_labels,
+)
 from rft.ui.sketch_palette import brush_key_for_style
 
 # #49 (U5) -- the renderer's ONLY WPF imports for the live sketch. These
@@ -177,6 +182,15 @@ except Exception:
 # ``FindResource`` specifically, nor ``PointCollection`` construction from
 # IronPython 2.7. This whole rendering path is UNVERIFIED until it is
 # shown on a live host (see this ticket's report).
+
+# #62 -- the sketch's own two presentation constants.
+#
+# MIN_BAR_RADIUS_PX: a bar's position is exact, its drawn size is a
+# symbol. Without a floor, a 16 mm bar on a 900 mm section is ~2 px.
+# SKETCH_FONT_SIZE_PX must match rft.ui.sketch_layout's own default, since
+# that module estimates a label's width from it.
+MIN_BAR_RADIUS_PX = 3.0
+SKETCH_FONT_SIZE_PX = 11.0
 
 output = script.get_output()
 doc = revit.doc
@@ -1183,6 +1197,7 @@ class DetailBeamWindow(forms.WPFWindow):
         def to_px(u_mm, v_mm):
             return cx + u_mm * scale, cy - v_mm * scale
 
+        text_shapes = []
         for shape in shapes:
             brush = self.FindResource(brush_key_for_style(shape.style))
             if isinstance(shape, ui_sketch.SketchLine):
@@ -1195,7 +1210,14 @@ class DetailBeamWindow(forms.WPFWindow):
                 canvas.Children.Add(line)
             elif isinstance(shape, ui_sketch.SketchCircle):
                 x, y = to_px(shape.u, shape.v)
-                r_px = shape.r * scale
+                # #62: a MINIMUM drawn radius. A 16 mm bar on a 900 mm
+                # deep section fitted to this canvas is about 2 px across
+                # -- correct to scale, and invisible. The bar's POSITION
+                # stays exact (it is the plan's own u/v, untouched); only
+                # the symbol drawn at that position gets a floor, exactly
+                # as docs/ui/sketch-notation.svg draws bars as symbols
+                # rather than to-scale circles.
+                r_px = max(shape.r * scale, MIN_BAR_RADIUS_PX)
                 ellipse = WpfEllipse()
                 ellipse.Width = 2.0 * r_px
                 ellipse.Height = 2.0 * r_px
@@ -1214,14 +1236,45 @@ class DetailBeamWindow(forms.WPFWindow):
                 polygon.StrokeThickness = 1.2
                 canvas.Children.Add(polygon)
             elif isinstance(shape, ui_sketch.SketchText):
-                x, y = to_px(shape.u, shape.v)
-                text_block = WpfTextBlock()
-                text_block.Text = shape.text
-                text_block.FontSize = 10.0
-                text_block.Foreground = brush
-                WpfCanvas.SetLeft(text_block, x)
-                WpfCanvas.SetTop(text_block, y)
-                canvas.Children.Add(text_block)
+                # Collected, not drawn: every label's final position is
+                # decided together, below, so none is clipped by the
+                # canvas edge and none lands on another (#62).
+                text_shapes.append(shape)
+
+        # #62: labels last, and placed as a set.
+        #
+        # Drawn straight from the transform, a label anchored near a
+        # support had its tail cut off by the canvas edge ("A7 clearanc"),
+        # and two layers 0.1 mm apart drew their achieved spacing on top
+        # of one another. Both are presentation, and both are fiddly
+        # enough to need tests -- so the decision lives in
+        # rft.ui.sketch_layout, which is importable, and this loop only
+        # applies the answer.
+        #
+        # Order is priority: sketch.py emits its dimension labels before
+        # its captions, so a dimension keeps the position it asked for and
+        # a caption moves out of the way.
+        boxes = []
+        for shape in text_shapes:
+            x, y = to_px(shape.u, shape.v)
+            text_width_px, text_height_px = estimate_text_size_px(
+                shape.text, SKETCH_FONT_SIZE_PX)
+            # Centred on its anchor horizontally, which is how the
+            # notation drawing dimensions a span, and lifted so the
+            # anchor is the label's baseline rather than its top edge.
+            boxes.append(LabelBox(
+                x - text_width_px / 2.0, y - text_height_px,
+                text_width_px, text_height_px,
+            ))
+        for shape, box in zip(text_shapes, place_labels(boxes, width_px, height_px)):
+            text_block = WpfTextBlock()
+            text_block.Text = shape.text
+            text_block.FontSize = SKETCH_FONT_SIZE_PX
+            text_block.Foreground = self.FindResource(
+                brush_key_for_style(shape.style))
+            WpfCanvas.SetLeft(text_block, box.x)
+            WpfCanvas.SetTop(text_block, box.y)
+            canvas.Children.Add(text_block)
 
     def on_build_report_click(self, sender, args):
         """WPF click handler. Does no Revit work itself (#57) -- the full

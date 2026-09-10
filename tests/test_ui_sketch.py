@@ -332,7 +332,14 @@ def test_anchorage_dimensions_come_from_the_end_plan_exactly():
 def test_a_refused_end_draws_no_bar_segment_and_does_not_crash():
     """The exact defect found in the initial draft: a refused EndPlan has
     a_mm/b_mm both None, and a naive "{:.1f}".format(None) raises
-    TypeError. This must draw a caption with the plan's own text instead.
+    TypeError.
+
+    Updated by #62. This used to require the plan's FULL refusal text on
+    the drawing. A51's reason is four sentences; drawn across the beam it
+    was unreadable and buried the drawing it was annotating. The sketch
+    now says which face, which end, and that it is refused -- and points
+    at the Review tab, which states the reason in full and is tested for
+    that in tests/test_ui_report.py.
     """
     refused = plan.face_plan(
         True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM,
@@ -347,7 +354,21 @@ def test_a_refused_end_draws_no_bar_segment_and_does_not_crash():
     )
     assert not [s for s in shapes if s.style == "bar_main"]
     captions = [s for s in shapes if s.style == "dimension_fail"]
-    assert any(refused.start_end.refused_reason in s.text for s in captions)
+    assert captions, "a refused end must still be announced on the drawing"
+
+    text = " ".join(c.text for c in captions)
+    assert "REFUSED" in text
+    assert "Top" in text                    # which face
+    assert "start" in text                  # which end
+    assert "Review" in text                 # where the full reason is
+
+    # The point of the change: no caption is a paragraph any more.
+    for caption in captions:
+        assert len(caption.text) <= 60, (
+            "in-canvas label is %d characters -- prose belongs in the "
+            "caption under the canvas (#62): %r"
+            % (len(caption.text), caption.text)
+        )
 
 
 def test_crack_bar_line_present_only_when_crack_plan_given():
@@ -412,3 +433,111 @@ def test_hook_detail_leg_length_scales_and_labels_the_angle():
     assert "135.0" in caption.text
     assert "75.0" in caption.text
     assert "SCHEMATIC" in caption.text
+
+
+# --- #62: labels, not prose ------------------------------------------------
+
+MAX_LABEL_CHARS = 46
+
+
+def _every_label_the_sketch_can_draw():
+    """Every SketchText the three views produce, across the awkward cases
+    as well as the happy one -- a refused end, a failing spacing, an
+    unsupported end -- since those are where the long strings lived.
+    """
+    from rft.core.spacing import governing_min_spacing_mm, validate_face_spacing
+
+    labels = []
+
+    top = plan.face_layer_plans(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, SPACER_DIA_MM, 3, 2)
+    btm = plan.face_layer_plans(
+        False, H_MM, B_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, SPACER_DIA_MM, 3, 2)
+    gov = governing_min_spacing_mm(BAR_DIA_MM, 20.0, None)
+    passing = validate_face_spacing(
+        "Top face", 2, [3, 3], B_MM, COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, gov)
+    failing = validate_face_spacing(
+        "Top face", 2, [9, 9], B_MM, COVER_MM, STIRRUP_DIA_MM, BAR_DIA_MM, gov)
+    crack = plan.crack_plan(
+        H_MM, B_MM, COVER_MM, STIRRUP_DIA_MM, CRACK_DIA_MM, 75.0, 75.0, 200.0)
+
+    for spacing in (passing.layer_results, failing.layer_results):
+        labels += [
+            s for s in sketch.section_shapes(
+                b_mm=B_MM, h_mm=H_MM, cover_top_mm=COVER_MM,
+                cover_btm_mm=COVER_MM, cover_side_mm=COVER_MM,
+                stirrup_cover_mm=COVER_MM, stirrup_dia_mm=STIRRUP_DIA_MM,
+                top_bar_dia_mm=BAR_DIA_MM, top_layers=top, top_spacing=spacing,
+                bottom_bar_dia_mm=BAR_DIA_MM, bottom_layers=btm,
+                crack_dia_mm=CRACK_DIA_MM, crack_plan=crack,
+            )
+            if isinstance(s, sketch.SketchText)
+        ]
+
+    supported = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, BAR_DIA_MM, SPACER_DIA_MM, 3, 2, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0)
+    refused = plan.face_plan(
+        True, H_MM, B_MM, COVER_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        BAR_DIA_MM, None, SPACER_DIA_MM, 3, 2, 60.0,
+        True, 400.0, 40.0, True, 400.0, 40.0)
+    stirrups = plan.stirrup_plan(
+        L_MM, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1, 150.0, 200.0, 200.0, 200.0)
+
+    for face in (supported, refused):
+        labels += [
+            s for s in sketch.elevation_shapes(
+                L_MM, 400.0, 400.0, H_MM,
+                top_end_start=face.start_end, top_end_end=face.end_end,
+                stirrup_plan=stirrups, crack_plan=crack,
+            )
+            if isinstance(s, sketch.SketchText)
+        ]
+
+    labels += [s for s in sketch.hook_detail_shapes(135.0, 75.0)
+               if isinstance(s, sketch.SketchText)]
+    return labels
+
+
+def test_no_label_drawn_inside_a_canvas_is_prose():
+    """#62, generalised past the four strings that were actually wrong.
+
+    On the first live run of v0.3.0-rc1 a 105-character sentence was drawn
+    across the middle of the elevation, colliding with two zone labels and
+    running off the right edge mid-word. Three others were long enough to
+    clip. rft.ui.sketch_layout guarantees a label is never CUT OFF and
+    never OVERLAPS -- but it does that by moving labels, and a paragraph
+    that has been moved is still a paragraph lying across a drawing.
+
+    So the length is capped here, at the source. A drawing carries labels;
+    the explanation goes in the caption under the canvas, where there is
+    room for a sentence and nothing to collide with.
+    """
+    too_long = [
+        (len(s.text), s.text) for s in _every_label_the_sketch_can_draw()
+        if len(s.text) > MAX_LABEL_CHARS
+    ]
+    assert not too_long, (
+        "these in-canvas labels are longer than %d characters, which is "
+        "prose rather than a label: %s" % (MAX_LABEL_CHARS, too_long)
+    )
+
+
+def test_the_schematic_elements_are_still_marked_schematic_on_the_drawing():
+    """#49's acceptance criterion, which #62 must not quietly trade away.
+
+    Shortening the schematic notes to fit is right; deleting the word
+    would swap one ticket's requirement for another's. The marker stays on
+    the drawing, the explanation moves to the caption.
+    """
+    labels = _every_label_the_sketch_can_draw()
+    marked = [s.text for s in labels if "SCHEMATIC" in s.text.upper()]
+    assert marked, (
+        "nothing on the drawing says which elements are schematic any "
+        "more -- #49 requires that labelling to be ON the drawing"
+    )
+    assert any("tick" in t.lower() for t in marked), marked
+    assert any("bend" in t.lower() for t in marked), marked

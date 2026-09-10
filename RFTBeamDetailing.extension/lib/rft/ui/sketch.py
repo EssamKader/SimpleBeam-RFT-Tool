@@ -230,9 +230,9 @@ def section_shapes(b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
             shapes.append(SketchCircle(u_right_mm, v_mm, r_crack_mm, "bar_crack"))
         shapes.append(SketchText(
             0.0, half_h + 24.0,
-            "H_avail = {:.1f} mm ({} crack layer{} @ {:.1f} mm, section 5.1/5.2)".format(
+            "H_avail = {:.1f} mm, {} @ {:.1f} mm".format(
                 crack_plan.h_avail_mm, crack_plan.n_layers,
-                "" if crack_plan.n_layers == 1 else "s", crack_plan.spacing_mm,
+                crack_plan.spacing_mm,
             ),
             "caption",
         ))
@@ -247,7 +247,12 @@ def section_shapes(b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
 # already labelled schematic (A48/A49), so drawing every one buys nothing
 # and can make the canvas unreadable. The exact count is stated in the
 # "n @ s" label regardless of how many ticks are actually drawn.
-MAX_SCHEMATIC_TICKS_PER_ZONE = 24
+# #62: was 24. Three zones of up to 24 ticks merged into a solid
+# hatch on a 9.6 m beam, hiding the bar runs behind them. Eight is
+# enough to read as "evenly spaced" -- which is all these claim to
+# be, since the true stations belong to Revit's rebar set and the
+# exact count and spacing are stated in the zone's own label.
+MAX_SCHEMATIC_TICKS_PER_ZONE = 8
 
 
 def _schematic_tick_positions_mm(zone_start_mm, zone_end_mm, count):
@@ -349,11 +354,22 @@ def elevation_shapes(l_mm, support_width_start_mm, support_width_end_mm, h_mm,
                 shapes.append(SketchLine(
                     u_tick_mm, -half_h_mm, u_tick_mm, half_h_mm, "schematic"
                 ))
+        # #62: this was a 105-character sentence across the middle of
+        # the elevation -- "stirrup stations are SCHEMATIC, count and
+        # spacing are exact, positions are laid out by Revit's rebar
+        # set". It collided with two zone labels and ran off the right
+        # edge mid-word.
+        #
+        # It is now a marker, not a sentence. #49's acceptance criterion
+        # requires the schematic elements to be labelled AS schematic ON
+        # THE DRAWING, so the word stays; the explanation of WHY they are
+        # schematic moves to the caption under the canvas, which already
+        # carried it. Deleting the marker outright would have traded one
+        # ticket's requirement for another's.
         shapes.append(SketchText(
-            (stirrup_plan.zones[0].zone.start + stirrup_plan.zones[-1].zone.end) / 2.0,
+            stirrup_plan.zones[0].zone.start,
             band_bottom_mm - 16.0,
-            "stirrup stations are SCHEMATIC -- count and spacing are exact, "
-            "positions are laid out by Revit's rebar set",
+            "ticks SCHEMATIC",
             "schematic",
         ))
 
@@ -373,9 +389,18 @@ def elevation_shapes(l_mm, support_width_start_mm, support_width_end_mm, h_mm,
         refused = [e for e in (end_start, end_end) if e.refused_reason]
         if refused:
             for e in refused:
+                # #62: e.refused_reason is a paragraph (A51's is four
+                # sentences). Drawn across the beam it was unreadable and
+                # buried the drawing. The Review tab states it in full;
+                # the sketch says WHICH end and that it is refused, which
+                # is what a drawing can usefully carry.
                 shapes.append(SketchText(
                     l_mm / 2.0, half_h_mm * (0.6 if is_top else -0.6),
-                    e.refused_reason, "dimension_fail",
+                    "{}, {}: REFUSED (see Review)".format(
+                        "Top" if is_top else "Btm",
+                        "start" if e is end_start else "end",
+                    ),
+                    "dimension_fail",
                 ))
             continue
 
@@ -408,7 +433,11 @@ def elevation_shapes(l_mm, support_width_start_mm, support_width_end_mm, h_mm,
         u_mm = 0.0 if label == "start" else l_mm
         shapes.append(SketchText(
             u_mm, half_h_mm + 20.0,
-            "A7 clearance ({}): achieved {:.1f} mm, required {:.1f} mm ({})".format(
+            # #62: was "A7 clearance (start): achieved 41.9 mm,
+            # required 14.0 mm (PASS)" -- 62 characters anchored at the
+            # support, i.e. at the canvas edge, so its tail was cut off.
+            # Both numbers and the verdict survive; the prose does not.
+            "A7 {}: {:.1f} / {:.1f} mm ({})".format(
                 label, clearance.achieved_mm, clearance.required_mm,
                 "PASS" if clearance.ok else "FAIL",
             ),
@@ -445,8 +474,13 @@ def hook_detail_shapes(bend_leg_mm, hook_angle_deg, cu_mm=0.0, cv_mm=0.0, scale=
         # the fillet the bar type's own bend radius actually traces.
         SketchLine(p1[0], p1[1], p1[0] + leg_mm * 0.35, p1[1] + leg_mm * 0.35, "schematic"),
         SketchText(cu_mm, cv_mm - leg_mm - 16.0,
-                   "{:.1f} deg hook, leg {:.1f} mm (angle/length exact; "
-                   "fillet is SCHEMATIC -- bar type's own bend radius)".format(
+                   # #62: was 52 characters explaining WHY the fillet
+                   # is schematic. The explanation moved to the caption;
+                   # the marker stays on the drawing, because #49
+                   # requires it there. Angle and leg length are the
+                   # exact numbers, and exact numbers are what a label
+                   # is for.
+                   "{:.1f} deg hook, leg {:.1f} mm (bend SCHEMATIC)".format(
                        hook_angle_deg, bend_leg_mm),
                    "schematic"),
     ]
