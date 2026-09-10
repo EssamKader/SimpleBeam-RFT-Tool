@@ -6,9 +6,15 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.2.0` is the current release, and it is verified**: the single
-`Detail Beam` window opens, picks a beam, reports its plan and places main
-bars, stirrups and crack bars in a live Revit 2024 session. Load this one.
+**`v0.2.1` is the current release. Load this one.** It fixes two defects
+in `v0.2.0`: a crash in Place on one valid combination of inputs, and a
+Review report that described the stirrup sets with the wrong grouping.
+
+**`v0.2.0` is the verified one**: the single `Detail Beam` window opens,
+picks a beam, reports its plan and places main bars, stirrups and crack
+bars in a live Revit 2024 session. `v0.2.1` has not had that live run
+yet -- its changes are covered by 399 tests and a before/after diff of
+every report line, which is not the same thing.
 
 **`v0.1.0` was the first release**, and is also verified — but its ribbon
 is three separate pushbuttons that `v0.2.0` deletes. It is kept tagged as
@@ -44,6 +50,136 @@ Layout follows pyRevit convention — `RFTBeamDetailing.extension/` containing
 `sys.path` automatically so `rft.core`, `rft.revit` and `rft.ui` import
 cleanly. As of `v0.2.0` that is the only panel and the only button: the
 `Main Bars`, `Stirrups` and `Crack Bars` panels were removed by #55.
+
+## [v0.2.1] — 2026-09-10
+
+**Two defects in `v0.2.0`, and the report is finally testable.** Load this
+one: `v0.2.0`'s Place could crash outright on one valid combination of
+inputs, and its Review report described your stirrups with the wrong
+grouping.
+
+**Re-test on a live host before trusting it.** Nothing here changes where
+a bar goes -- the report's output is byte-identical across 84 renderings,
+and the stirrup positions were computed both ways and diffed -- but Place
+now groups the stirrups into its three sets differently, and only a live
+run shows that.
+
+### A crack-bar crash, reachable in `v0.2.0`
+
+The placer read each face's innermost layer offset off a whole `FacePlan`,
+and built both faces a SECOND time inside the crack branch after having
+already built them above. A `FacePlan` needs a per-layer bar count,
+because it also computes every bar's `u`. A50 only requires a face to be
+DETAILED: a bar type and a layer count. So detail both faces, place only
+one, request crack bars -- a combination the derivation explicitly
+declares valid -- and the second build raised
+
+```
+TypeError: '<' not supported between instances of 'NoneType' and 'int'
+```
+
+from inside `corner_bar_u_positions_mm`, with the transaction already
+open. `H_avail` never needed a bar count:
+`core_plan.innermost_layer_offset_mm` now answers exactly the question the
+crack plan asks, and names the fact that the innermost layer is layer
+number `layer_count` rather than layer 1 -- which had been re-stated at
+three call sites, each spelling it differently.
+
+### The report and the placer disagreed about the stirrup zones
+
+`rft.core.plan` had grown its own copy of `ZONE_LAYOUT_FLAGS`, and the
+copy said something different from the original in `rft.core.stirrups`:
+
+| | zone 1 | zone 2 | zone 3 |
+|---|---|---|---|
+| original (tested) | `(True, True)` | `(False, False)` | `(True, True)` |
+| `plan.py`'s copy | `(True, True)` | `(False, True)` | `(False, True)` |
+
+Both give each zone boundary exactly one owner, so both place bars at the
+**same positions** -- confirmed by computing both position sets, which are
+identical -- and both total 47 stirrups on the verification beam. That is
+why nothing noticed. What differed is WHICH ZONE owns the bar at 2L/3. The
+Review report imported the original and said "zone2: count = 9, zone3:
+count = 19"; Place used the copy and built sets of 10 and 18. In `v0.2.0`
+the report described the right steel with the wrong grouping.
+
+`plan.py` now re-exports the constant. **This changes Place**: the bar at
+2L/3 belongs to zone 3's set rather than zone 2's, which is what the three
+verified pushbuttons did. Positions are unchanged.
+
+#56's own test had pinned the copy, and was named
+`test_three_zones_with_the_layout_flags_the_verified_button_uses`. It was
+not what the verified button used. A test that pins a duplicate is not a
+check on the duplicate; it is a second place the duplicate is written
+down.
+
+### The report is out of `script.py`, and tested
+
+~400 lines of the most detailed prose the tool produces -- every layer
+offset, every achieved spacing, every anchorage `a` and `b`, every warning
+-- lived inside `script.py`, which imports `pyrevit` and cannot be
+imported under CPython at all. Not one line of it could be executed by a
+test. It was the largest untested piece of the project, and it is the text
+the engineer reads before committing steel to a model.
+
+It is now `rft/ui/report.py`: pure functions over values already
+computed. `script.py` keeps one job on that path -- read the model, hand
+over plain values -- and the report's stirrup and crack sections now
+FORMAT the `StirrupPlan` and `CrackPlan` the placer executes instead of
+recomputing them.
+
+The move itself was mechanical, deliberately: nothing here can execute the
+old report to compare, so the transform only dedented a method or
+substituted a `self.<x>` read for the parameter now carrying the same
+value. Then a harness ran the report before and after over 28
+configurations x 3 sections and diffed all 84 renderings line for line:
+zero differences.
+
+### Two things it stopped re-reading
+
+- **Bar diameters.** `bar_type_diameter_mm` is a Revit parameter read, and
+  the live `H_avail` readout made three of them on EVERY KEYSTROKE in `h`,
+  in either layer count, and in the spacer field -- on the UI thread,
+  while the engineer is typing. A bar type's diameter cannot change while
+  the window is open, so it is read once per type.
+- **Support detection.** `find_supporting_element` is a document-wide
+  scan, run once per end, plus a host validation and a cover read per
+  support. The whole pass ran again for every report and again for Place.
+  It is now computed once per pick, and cleared on re-pick along with the
+  rest of the beam-scoped state -- the previous beam's supports would
+  report and place against the wrong span, plausibly and silently, which
+  is the worst way for a cache to be wrong.
+
+### CI
+
+There was none. `.github/workflows/tests.yml` runs pytest, the mutation
+prover and a compile pass on every push. The prover is the one that
+matters: a text guard that matches nothing passes silently, and two of
+them did.
+
+### Numbers
+
+`script.py`: 2145 -> 1738 lines. Tests: 363 -> 399. Guards proven by
+mutation: 12 -> 18.
+
+### The prover deadlocked while proving this
+
+Worth recording, because it is the second time this tool has failed in the
+same direction. `tools/prove_guards.py` ran its pytest child with
+`stdout=PIPE` and never read the pipe. One of the new guards failed with a
+500-line module source as an assertion operand -- pytest prints an
+assert's operands -- which overflowed the 8 KB pipe buffer: the child
+blocked on write, the parent waited forever, and the restore in its
+`finally` never ran, so a MUTATED source file sat in the working tree the
+whole time.
+
+Fixed in the general form rather than the specific one: `subprocess.run`
+drains the pipes, a 300 s timeout turns a future hang into a reported
+failure, and the guard now asserts on a short list of missing calls
+instead of on the file it read. An assertion message should be the size of
+the fact it reports.
+
+---
 
 ## [v0.2.0] — 2026-09-10
 
@@ -489,9 +625,13 @@ configuration. The 0° and 45° beams were detailed successfully; a
 measured check of covers and bar positions against the spec, per
 configuration, has not been done.
 
-## [Unreleased]
+## Development log up to `v0.1.0`
 
-Nothing. `master` and `v0.1.0` are the same tree.
+Kept for the record: what was built, decided and risk-assessed on the way
+to the first release. This section was headed "[Unreleased]" and opened
+with "Nothing -- `master` and `v0.1.0` are the same tree", which was true
+the day `v0.1.0` was cut and has been wrong ever since. Current unreleased
+work is at the top of this file.
 
 ### Added
 
