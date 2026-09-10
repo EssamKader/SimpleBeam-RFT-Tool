@@ -140,6 +140,7 @@ from rft.revit.stirrups import (
 from rft.revit.units import internal_to_mm, mm_to_internal
 from rft.ui import derivation as ui_derivation
 from rft.ui import inputs as ui_inputs
+from rft.ui import persistence as ui_persistence
 from rft.ui import report as ui_report
 from rft.ui import sketch as ui_sketch
 from rft.ui.sketch_layout import (
@@ -470,6 +471,23 @@ class SimpleBeamWindow(forms.WPFWindow):
             getattr(self, canvas_name).SizeChanged += self._redraw_sketches
 
         self._reset_beam_state(message="No beam picked yet.")
+
+        # #54 (U10) -- this project's remembered inputs, applied AFTER the
+        # defaults above so a remembered value wins, and BEFORE the
+        # derivation refresh below so Place's enabled state is computed
+        # from what was actually restored rather than from the defaults.
+        #
+        # It cannot arm Place: rft.ui.persistence withholds the four
+        # inputs that decide whether a section is REQUESTED, which is
+        # what makes "restoring values is not restoring intent" a
+        # structural property rather than a promise.
+        self._restore_project_inputs()
+
+        # Remembered when the window closes, and again after a successful
+        # Place -- the two moments the values are known to be the ones the
+        # engineer meant.
+        self.Closing += self._on_closing
+
         # Sets the initial "nothing requested -- Place disabled" state
         # (this ticket's brief) -- without this call Place would open
         # enabled until the first keystroke or pick touched a wired field.
@@ -478,6 +496,127 @@ class SimpleBeamWindow(forms.WPFWindow):
         # than leaving whatever WPF's own default (blank) Canvas looks
         # like before the first keystroke or pick touches a wired field.
         self._redraw_sketches()
+
+    # --------------------------------------------- #54 (U10) persistence
+    #
+    # WHAT IS AND IS NOT REMEMBERED, and why, is decided in
+    # ``rft.ui.persistence`` -- a pure module, so the rule that a restore
+    # can never arm Place is tested against the real derivation rather
+    # than asserted here. These three methods only move values between
+    # that module and the controls.
+    #
+    # PER PROJECT, never per user: ``this_project=True`` is pyRevit's own
+    # default and is passed explicitly anyway, because the difference
+    # matters -- global storage would carry one job's cover conventions
+    # and spacings into an unrelated job. Note pyRevit keys the slot by
+    # the Revit PROJECT NAME, so two documents sharing a name share these
+    # settings; that is pyRevit's scoping and not something this tool can
+    # tighten.
+
+    def _store_project_inputs(self):
+        """Remember this project's inputs. Never raises: failing to save a
+        convenience must not turn into a failed Place or a window that
+        cannot close.
+        """
+        try:
+            data = ui_persistence.to_store(
+                dict((name, getattr(self, name).Text)
+                     for name in ui_persistence.TEXT_FIELDS),
+                dict((name, getattr(self, name).SelectedItem)
+                     for name in ui_persistence.CHOICE_FIELDS),
+                self._persistable_type_ids(),
+            )
+            script.store_data(
+                ui_persistence.SETTINGS_SLOT, data, this_project=True)
+        except Exception:
+            pass
+
+    def _persistable_type_ids(self):
+        """Each remembered role's ``UniqueId``.
+
+        UniqueId and not ElementId: it survives reopening the model, where
+        a name can be edited and an ElementId means nothing in another
+        document. ``None`` for an unpicked role, which ``to_store`` drops.
+        """
+        ids = {}
+        for attr_name in ui_persistence.TYPE_FIELDS:
+            element = getattr(self.selection, attr_name)
+            if element is not None:
+                ids[attr_name] = element.UniqueId
+        return ids
+
+    def _restore_project_inputs(self):
+        """Apply this project's remembered inputs.
+
+        Never raises, and never half-applies a field: this runs while the
+        window is opening, and a settings file is not worth failing to
+        open the tool over. ``script.load_data`` raises rather than
+        returning None when nothing has been stored yet, which is the
+        normal first run on a project, so the existence check is not
+        optional.
+        """
+        try:
+            if not script.data_exists(
+                    ui_persistence.SETTINGS_SLOT, this_project=True):
+                return
+            raw = script.load_data(
+                ui_persistence.SETTINGS_SLOT, this_project=True)
+        except Exception:
+            return
+
+        text, choices, types = ui_persistence.from_store(raw)
+
+        for name, value in text.items():
+            getattr(self, name).Text = value
+
+        for name, label in choices.items():
+            combo = getattr(self, name)
+            # Only a label the picker actually offers. Setting an unknown
+            # one leaves SelectedItem null, which reads as unpicked -- and
+            # ui_inputs looks choices up by EXACT label with no fallback
+            # to the leading numeral, so a near-match can never resolve
+            # to the wrong option.
+            if label in list(combo.ItemsSource or []):
+                combo.SelectedItem = label
+
+        self._restore_selected_types(types)
+
+    def _restore_selected_types(self, unique_ids):
+        """Re-select each remembered bar type by ``UniqueId``.
+
+        Sets the COMBOBOX rather than ``self.selection`` directly, so the
+        picker's own handler populates the selection -- A42's rule that a
+        role is written only by its picker, with no second path into it.
+
+        The remembered id is matched against THE PICKER'S OWN OPTIONS, not
+        resolved through ``doc.GetElement``. Those options came from
+        ``bar_type_options``, so anything in them is already a real,
+        pickable ``RebarBarType`` in this document -- which means a
+        deleted type, or an id that now belongs to something else, simply
+        fails to match and the role stays "not selected". That is the
+        normal state of a freshly opened window, so every downstream
+        branch already handles it.
+
+        Matching the list rather than asking the API also keeps a Revit
+        call out of the constructor, and this project has been bitten
+        three times by assuming what an API call returns without a host
+        to check against.
+        """
+        by_attr = dict(
+            (attr_name, (role, combo_name))
+            for role, attr_name, combo_name, _label in BAR_TYPE_ROLE_ROWS
+        )
+        for attr_name, unique_id in unique_ids.items():
+            role, combo_name = by_attr[attr_name]
+            for label, bar_type in self._bar_type_options_by_role.get(role, []):
+                if bar_type.UniqueId == unique_id:
+                    getattr(self, combo_name).SelectedItem = label
+                    break
+
+    def _on_closing(self, sender, args):
+        """Remember the inputs on the way out, so a beam detailed without
+        pressing Place still leaves its conventions behind."""
+        self._store_project_inputs()
 
     # ------------------------------------------------------- bar/hook types
     def _diameter_mm(self, bar_type):
@@ -2254,6 +2393,10 @@ class SimpleBeamWindow(forms.WPFWindow):
         )
         self.place_result_tb.Text = message
         self.status_tb.Text = message
+        # #54: a successful Place is the strongest evidence these inputs
+        # were the intended ones, so remember them for the next beam in
+        # this project.
+        self._store_project_inputs()
 
 
 # The window must outlive main(). A modeless window whose only reference is

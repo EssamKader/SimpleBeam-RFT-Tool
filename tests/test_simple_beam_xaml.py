@@ -64,6 +64,10 @@ NON_XAML_SELF_ATTRS = {
     # FrameworkElement) used by the sketch renderer to look up a brush by
     # its x:Key name. Not an x:Name control itself.
     "FindResource",
+    # #54 (U10) -- Window.Closing, the inherited WPF event the window
+    # subscribes to so this project's inputs are remembered on the way
+    # out. An event on the base class, not an x:Name control.
+    "Closing",
 }
 
 # This exclusion list is a maintenance cost, and deliberately so: a new
@@ -767,4 +771,75 @@ def test_every_static_resource_reference_is_defined():
     assert not missing, (
         "these StaticResource keys are referenced but never declared with "
         "x:Key, which throws at window construction: %s" % missing
+    )
+
+
+def test_the_script_persists_only_what_the_persistence_module_allows():
+    """#54 (U10). The rule that a restore cannot arm Place holds because
+    four inputs are never stored -- and that holds only while the SCRIPT
+    reads its field lists from rft.ui.persistence instead of naming
+    fields itself.
+
+    tests/test_ui_persistence.py proves the rule against the real
+    derivation, but it can only see the lists. If the script were to add
+    `data["text"]["top_bar_count_tb"] = ...` on its way past, the pure
+    module would still look correct and the guarantee would be gone. So
+    this reads the script.
+    """
+    from rft.ui import persistence as ui_persistence
+
+    body = _code_only(_method_body("_store_project_inputs"))
+    for name in ui_persistence.TEXT_FIELDS + ui_persistence.CHOICE_FIELDS:
+        assert name not in body, (
+            "%s is named directly in _store_project_inputs; the field "
+            "lists belong to rft.ui.persistence, which is where the "
+            "withheld four are enforced" % name
+        )
+    assert "ui_persistence.TEXT_FIELDS" in body
+    assert "ui_persistence.CHOICE_FIELDS" in body
+    assert "ui_persistence.to_store(" in body
+
+    # And nothing anywhere in the script may store a withheld field.
+    script_text = _code_only(io.open(SCRIPT_PATH, encoding="utf-8").read())
+    store_region = script_text[script_text.index("def _store_project_inputs"):]
+    store_region = store_region[:store_region.index("def _restore_project_inputs")]
+    for field in ui_persistence.REQUEST_CONSTITUTING_FIELDS:
+        assert field not in store_region, (
+            "%s decides whether a section is REQUESTED and must never be "
+            "persisted (U10): restoring values is not restoring intent" % field
+        )
+
+
+def test_settings_are_stored_per_project_and_never_globally():
+    """U10: "Not per-user-global, which would carry one job's cover
+    conventions into an unrelated job." pyRevit's this_project flag
+    defaults to True, so the failure mode is a call that passes False --
+    or one that relies on the default and is later "tidied".
+    """
+    script_text = _code_only(io.open(SCRIPT_PATH, encoding="utf-8").read())
+    for call in ("script.store_data(", "script.load_data(", "script.data_exists("):
+        assert call in script_text, "%s is not called at all" % call
+    assert "this_project=False" not in script_text, (
+        "settings must be per project, not per user"
+    )
+    # Stated explicitly at every call site rather than left to the default.
+    assert script_text.count("this_project=True") == 3, (
+        "each of store_data/load_data/data_exists must pass "
+        "this_project=True explicitly -- the difference between per-project "
+        "and per-user is too important to read as a default"
+    )
+
+
+def test_a_first_run_checks_before_loading_stored_data():
+    """pyRevit's load_data opens the file directly and RAISES when nothing
+    has been stored yet -- which is the normal first run on any project.
+    The existence check is not optional, and the wrapper is not either.
+    """
+    body = _code_only(_method_body("_restore_project_inputs"))
+    assert "script.data_exists(" in body, (
+        "load_data raises on a first run; check data_exists first"
+    )
+    assert "except Exception:" in body, (
+        "restoring runs while the window is opening -- a settings file is "
+        "not worth failing to open the tool over"
     )
