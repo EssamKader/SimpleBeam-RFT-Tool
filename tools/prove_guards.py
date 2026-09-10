@@ -124,6 +124,17 @@ CASES = [
      "test_every_beam_scoped_attribute_is_cleared_on_pick",
      "cached supports surviving a re-pick"),
 
+    # #49's review finding: the pick handler had grown its own copy of the
+    # support-detection dict. It agreed with the original key for key,
+    # exactly as plan.py's copy of ZONE_LAYOUT_FLAGS agreed -- for three
+    # releases, while the report and the placer built different stirrup
+    # sets. This mutation puts a second writer back.
+    (SCRIPT, "        self._support_detection = _support_detection(",
+     '        self._support_detection = {"support_width_start_mm": None}\n'
+     "        _unused = _support_detection(",
+     "test_the_support_detection_dict_has_exactly_one_writer",
+     "a second writer for the support-detection dict"),
+
     # The report's own half of the shared-plan rule. Its stirrup and crack
     # sections recomputed everything for three releases, and the guard
     # could not see it because the PLACER's calls satisfied the check.
