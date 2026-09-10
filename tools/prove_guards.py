@@ -96,6 +96,15 @@ CASES = [
      "<!-- #60: the palette, declared ONCE and never -- ever -- twice.",
      "test_no_xaml_comment_contains_a_double_hyphen",
      "a double hyphen inside a XAML comment"),
+
+    (SCRIPT, "core_plan.innermost_layer_offset_mm(\n                    geometry[\"cover_top_mm\"]",
+     "_face(True).layers[-1].offset_mm  # (\n                    geometry[\"cover_top_mm\"]",
+     "test_the_placer_does_not_rebuild_a_face_plan_for_the_crack_offsets",
+     "FacePlan rebuilt for the crack offsets (the blank-count crash)"),
+
+    (SCRIPT, "self._support_detection = None\n        self.beam_status_tb.Text", "        self.beam_status_tb.Text",
+     "test_every_beam_scoped_attribute_is_cleared_on_pick",
+     "cached supports surviving a re-pick"),
 ]
 
 
