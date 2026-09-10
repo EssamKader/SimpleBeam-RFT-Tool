@@ -6,15 +6,16 @@ A merge to `master` means the code exists; it does **not** mean it is safe
 to load. Only a tagged commit should be loaded into a Revit session, never
 `master` HEAD.
 
-**`v0.2.1` is the current release. Load this one.** It fixes two defects
-in `v0.2.0`: a crash in Place on one valid combination of inputs, and a
-Review report that described the stirrup sets with the wrong grouping.
+**`v0.2.1` is the current release, and it is verified. Load this one.**
+The single `Detail Beam` window opens, picks a beam, reports its plan and
+places main bars, stirrups and crack bars in a live Revit 2024 session --
+confirmed by the project owner on `v0.2.0` and again on `v0.2.1` after the
+stirrup grouping changed, with the three stirrup sets checked in the
+model.
 
-**`v0.2.0` is the verified one**: the single `Detail Beam` window opens,
-picks a beam, reports its plan and places main bars, stirrups and crack
-bars in a live Revit 2024 session. `v0.2.1` has not had that live run
-yet -- its changes are covered by 399 tests and a before/after diff of
-every report line, which is not the same thing.
+`v0.2.1` fixes two defects in `v0.2.0`: a crash in Place on one valid
+combination of inputs, and a Review report that described the stirrup sets
+with the wrong grouping.
 
 **`v0.1.0` was the first release**, and is also verified — but its ribbon
 is three separate pushbuttons that `v0.2.0` deletes. It is kept tagged as
@@ -58,11 +59,12 @@ one: `v0.2.0`'s Place could crash outright on one valid combination of
 inputs, and its Review report described your stirrups with the wrong
 grouping.
 
-**Re-test on a live host before trusting it.** Nothing here changes where
-a bar goes -- the report's output is byte-identical across 84 renderings,
-and the stirrup positions were computed both ways and diffed -- but Place
-now groups the stirrups into its three sets differently, and only a live
-run shows that.
+**Verified on a live host** (2026-09-10, Revit 2024): the window places
+main bars, stirrups and crack bars, and the three stirrup sets are present
+in the model after the grouping change. Nothing here moves a bar -- the
+report's output is byte-identical across 84 renderings, and the stirrup
+positions were computed under both flag sets and diffed -- but the
+grouping change was the one thing only a live run could show, and it did.
 
 ### A crack-bar crash, reachable in `v0.2.0`
 
