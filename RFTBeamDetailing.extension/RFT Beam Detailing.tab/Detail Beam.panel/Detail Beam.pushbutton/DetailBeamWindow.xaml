@@ -4,15 +4,110 @@
         Height="680" Width="880"
         MinHeight="520" MinWidth="640"
         WindowStartupLocation="CenterScreen"
-        SizeToContent="Manual">
+        SizeToContent="Manual"
+        Background="{StaticResource SurfaceWhite}">
+
+    <!-- #60: the palette, declared ONCE. Every colour in this window is a
+         named brush from here, so the whole scheme changes in one place
+         and nothing drifts. Two of them are deliberately NOT brand
+         colours: a window where everything is sky blue cannot show
+         alarm, so warnings stay amber and failures stay red. -->
+    <Window.Resources>
+        <SolidColorBrush x:Key="SurfaceWhite" Color="#FFFFFFFF"/>
+        <!-- Very pale sky, for grounds that must recede: the inactive tab
+             strip and (later, #51) the diagram backgrounds. -->
+        <SolidColorBrush x:Key="SurfaceTint" Color="#FFF2F9FD"/>
+        <SolidColorBrush x:Key="SurfaceDisabled" Color="#FFEDF1F3"/>
+
+        <!-- Sky blue itself. The SELECTED tab takes this, which is the
+             specific thing #60 asks for. It is light, so text on it is
+             INK, not white - white on #87CEEB is unreadable at 12pt and
+             would have been the obvious mistake. -->
+        <SolidColorBrush x:Key="SkyBlue" Color="#FF87CEEB"/>
+        <SolidColorBrush x:Key="SkyBlueHover" Color="#FFD6EEF9"/>
+        <!-- The deeper tone carries section headings, where sky blue
+             itself would be too faint against white to read as emphasis. -->
+        <SolidColorBrush x:Key="SkyBlueDeep" Color="#FF1F6F94"/>
+        <SolidColorBrush x:Key="BorderSubtle" Color="#FFC9DFEA"/>
+
+        <SolidColorBrush x:Key="InkPrimary" Color="#FF1B2A33"/>
+        <SolidColorBrush x:Key="InkMuted" Color="#FF5A6B75"/>
+        <!-- Disabled must stay LEGIBLE, not vanish: the Crack bars tab is
+             disabled until h > 700, so this state is on screen routinely
+             rather than exceptionally. -->
+        <SolidColorBrush x:Key="InkDisabled" Color="#FF8A9AA4"/>
+
+        <SolidColorBrush x:Key="WarningAmber" Color="#FFB05A00"/>
+        <SolidColorBrush x:Key="DangerRed" Color="#FFB00000"/>
+
+        <!-- The selected tab. WPF's default TabItem template paints its own
+             selected background and IGNORES Background entirely, so this
+             replaces the template rather than setting properties - the
+             same reason pyRevit's own SettingsWindow.xaml templates a
+             ToggleButton instead of styling one. -->
+        <Style TargetType="{x:Type TabItem}">
+            <Setter Property="Foreground" Value="{StaticResource InkMuted}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabChrome"
+                                Background="{StaticResource SurfaceTint}"
+                                BorderBrush="{StaticResource BorderSubtle}"
+                                BorderThickness="1,1,1,0"
+                                Margin="0,0,2,0" Padding="14,7,14,7">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabChrome" Property="Background"
+                                        Value="{StaticResource SkyBlue}"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource InkPrimary}"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="TabChrome" Property="Background"
+                                        Value="{StaticResource SkyBlueHover}"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TabChrome" Property="Background"
+                                        Value="{StaticResource SurfaceDisabled}"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource InkDisabled}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Section headings. Keyed, not implicit: an implicit TextBlock
+             style would also repaint the status and warning lines, which
+             carry meaning through colour. -->
+        <Style x:Key="SectionHeading" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{StaticResource SkyBlueDeep}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <Style TargetType="{x:Type TextBox}">
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSubtle}"/>
+            <Setter Property="Foreground" Value="{StaticResource InkPrimary}"/>
+            <Setter Property="Padding" Value="3,2,3,2"/>
+        </Style>
+    </Window.Resources>
 
     <!-- Shell (issue #46, U2): one WPFWindow, one TabControl, proven by the
- #42 spike, no Expander fallback needed. "Beam & Materials" is now
- #47 (U3)'s scope: geometry, four per-face covers, support
- detection, and one RebarBarType picker per role plus the stirrup
- RebarHookType. #48 (Main bars / Stirrups / Crack bars) and #50
- (Review) remain clearly-labelled placeholders, not stubs
- pretending to be finished. -->
+         #42 spike. Every tab is now built: Beam & Materials (#47),
+         Main bars / Stirrups / Crack bars (#48), Review (#50), and
+         placement itself (#56). #60 gives it the palette. -->
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -23,7 +118,9 @@
         <TextBlock Grid.Row="0" Margin="2,0,2,8" TextWrapping="Wrap"
                    Text="Detail Beam -- one command, one transaction (A46/A47). Pick a beam on the Beam &amp; Materials tab first (A35): every geometry and support field stays disabled until you do."/>
 
-        <TabControl x:Name="tabs" Grid.Row="1">
+        <TabControl x:Name="tabs" Grid.Row="1"
+                    Background="{StaticResource SurfaceWhite}"
+                    BorderBrush="{StaticResource BorderSubtle}">
 
             <TabItem Header="Beam &amp; Materials">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -35,14 +132,14 @@
                                 HorizontalAlignment="Left" Padding="14,4" Margin="0,0,0,6"/>
                         <TextBlock x:Name="beam_status_tb" FontWeight="Bold"
                                    Text="No beam picked yet." Margin="0,0,0,6" TextWrapping="Wrap"/>
-                        <TextBlock x:Name="warnings_tb" Foreground="#FFB05A00"
+                        <TextBlock x:Name="warnings_tb" Foreground="{StaticResource WarningAmber}"
                                    TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
                         <!-- Disabled as a whole group until a successful pick;
  re-picking repopulates every field below and
  re-runs support detection (A35). -->
                         <StackPanel x:Name="geometry_panel" IsEnabled="False">
-                            <TextBlock Text="Geometry (read from the model)" FontWeight="Bold" Margin="0,4,0,4" TextWrapping="Wrap"/>
+                            <TextBlock Text="Geometry (read from the model)" Style="{StaticResource SectionHeading}" Margin="0,4,0,4" TextWrapping="Wrap"/>
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -68,14 +165,14 @@
  format None numerically: the rc5 crash). Side cover is a
  fifth read this module also exposes (section 6/7's horizontal
  dimensions) and is shown alongside for the same reason. -->
-                            <TextBlock Text="Covers (read from the beam's own faces, per face)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                            <TextBlock Text="Covers (read from the beam's own faces, per face)" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                             <TextBlock x:Name="cover_top_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_bottom_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_side_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_start_end_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="cover_end_end_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
-                            <TextBlock Text="Support detection, per end" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                            <TextBlock Text="Support detection, per end" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                             <TextBlock x:Name="start_support_tb" TextWrapping="Wrap" Margin="0,0,0,2" Text=""/>
                             <TextBlock x:Name="end_support_tb" TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
 
@@ -89,7 +186,7 @@
  each combo carries A34's required grade
  (role_picker_label), set from script.py so the wording can
  never drift from rft.core.grades' own mapping. -->
-                            <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                            <TextBlock Text="Bar types (one per role, A34/A42 -- no fallback to &quot;first found&quot;)" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
 
                             <TextBlock x:Name="top_main_bar_label_tb" TextWrapping="Wrap" Margin="0,4,0,2" Text=""/>
                             <ComboBox x:Name="top_main_bar_combo" Margin="0,0,0,6" HorizontalAlignment="Left" MinWidth="360"/>
@@ -114,7 +211,7 @@
                             <TextBlock Text="Stirrup hook (RebarHookType, Stirrup/Tie family, 135 deg +/- 1 deg -- A45):"
                                        TextWrapping="Wrap" Margin="0,0,0,2"/>
                             <ComboBox x:Name="stirrup_hook_combo" Margin="0,0,0,2" HorizontalAlignment="Left" MinWidth="360"/>
-                            <TextBlock x:Name="stirrup_hook_status_tb" Foreground="#FFB00000"
+                            <TextBlock x:Name="stirrup_hook_status_tb" Foreground="{StaticResource DangerRed}"
                                        TextWrapping="Wrap" Margin="0,0,0,10" Text=""/>
                         </StackPanel>
                     </StackPanel>
@@ -132,7 +229,7 @@
                         <TextBlock TextWrapping="Wrap" Margin="0,0,0,10"
                                    Text="Bar counts and layer counts per face SHIP BLANK (A44) -- the engineer states them, and the tool never re-splits what is entered. Everything else here ships with its rev 2 section 8.1/A36 default."/>
 
-                        <TextBlock Text="Top face" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="Top face" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -151,7 +248,7 @@
                             <ComboBox x:Name="top_face_option_combo" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
                         </Grid>
 
-                        <TextBlock Text="Bottom face" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="Bottom face" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -170,7 +267,7 @@
                             <ComboBox x:Name="bottom_face_option_combo" Grid.Row="1" Grid.Column="2" Margin="0,2,0,0"/>
                         </Grid>
 
-                        <TextBlock Text="Layout and anchorage" FontWeight="Bold" Margin="0,4,0,4" TextWrapping="Wrap"/>
+                        <TextBlock Text="Layout and anchorage" Style="{StaticResource SectionHeading}" Margin="0,4,0,4" TextWrapping="Wrap"/>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -216,7 +313,7 @@
  guard it quotes. -->
             <TabItem Header="Stirrups">
                 <StackPanel Margin="10">
-                    <TextBlock Text="Spacing" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                    <TextBlock Text="Spacing" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                     <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -232,9 +329,9 @@
                         <TextBox x:Name="normal_spacing_tb" Grid.Row="1" Grid.Column="1" Margin="0,2,0,0" Text="200"/>
                     </Grid>
 
-                    <TextBlock Text="Closure type (section 7.2)" FontWeight="Bold" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                    <TextBlock Text="Closure type (section 7.2)" Style="{StaticResource SectionHeading}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                     <ComboBox x:Name="closure_type_combo" HorizontalAlignment="Left" MinWidth="120" Margin="0,0,0,4"/>
-                    <TextBlock x:Name="closure_type3_note_tb" Foreground="#FFB05A00"
+                    <TextBlock x:Name="closure_type3_note_tb" Foreground="{StaticResource WarningAmber}"
                                TextWrapping="Wrap" Margin="0,0,0,0" Text=""/>
                 </StackPanel>
             </TabItem>
@@ -255,7 +352,7 @@
                     <TextBlock x:Name="crack_s_max_label_tb" Text="Max spacing between crack-bar layers, s_max (mm)" TextWrapping="Wrap"/>
                     <TextBox x:Name="crack_s_max_tb" HorizontalAlignment="Left" MinWidth="120" Margin="0,2,0,10" Text=""/>
 
-                    <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" FontWeight="Bold" Margin="0,0,0,2" TextWrapping="Wrap"/>
+                    <TextBlock Text="H_avail (rev 2 section 5.1, A26 -- innermost main-bar layer, read from the Main bars tab)" Style="{StaticResource SectionHeading}" Margin="0,0,0,2" TextWrapping="Wrap"/>
                     <TextBlock x:Name="h_avail_tb" TextWrapping="Wrap" Text=""/>
                 </StackPanel>
             </TabItem>
@@ -303,7 +400,7 @@
                              Background="#FFF5F5F5" Text=""/>
 
                     <TextBlock x:Name="place_result_tb" Grid.Row="4" TextWrapping="Wrap"
-                               Margin="0,10,0,0" Foreground="#FFB00000" Text=""/>
+                               Margin="0,10,0,0" Foreground="{StaticResource DangerRed}" Text=""/>
                 </Grid>
             </TabItem>
         </TabControl>

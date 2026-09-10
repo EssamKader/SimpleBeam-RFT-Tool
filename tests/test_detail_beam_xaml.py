@@ -75,11 +75,17 @@ def _script_method_names():
 # reads them back. Listing them here says so explicitly, rather than
 # wiring a placeholder read that would do nothing.
 NOT_YET_REFERENCED = {
-    "tabs", "status_tb",
-    "top_bar_count_tb", "bottom_bar_count_tb",
-    "top_face_option_tb", "bottom_face_option_tb",
-    "d_agg_tb", "min_spacing_override_tb",
-    "dense_spacing_tb", "normal_spacing_tb",
+    # Trimmed by #60: every field #48 added is now read by #50's
+    # derivation/report or #56's placer, so the only genuinely
+    # unreferenced control left is the TabControl itself. A stale
+    # exclusion is a hole in this check, not a harmless leftover --
+    # two entries here named controls that had been RENAMED away, so
+    # the reverse check was excusing names that no longer existed.
+    # (top/bottom_face_option_tb were also listed here and named
+    # controls RENAMED to *_combo in rc3 -- they existed in neither
+    # file any more, which is precisely the kind of dead exclusion
+    # that quietly widens the hole this check is meant to close.)
+    "tabs",
 }
 
 # The tab headers owned by #47 (U3), #48 (U4) and #50 (U6) -- matched by
@@ -504,4 +510,32 @@ def test_every_review_attribute_the_script_uses_exists():
         "has no such field -- an AttributeError on a live host, after the "
         "transaction has already opened: %s (fields are %s)"
         % (unknown, list(ReviewDerivation._fields))
+    )
+
+
+def test_no_xaml_comment_contains_a_double_hyphen():
+    """A double hyphen is illegal inside an XML comment -- only the closing
+    "-->" may contain one -- and it makes the whole file unparseable, so
+    the window will not open at all.
+
+    This is the THIRD time it has happened here: once while #48 was being
+    implemented, once during rc3's label rework, once during #60's
+    palette. Every time it came from writing a XAML comment in the same
+    prose style as the Python comments right next to it, where "--" is
+    ordinary punctuation. test_xaml_parses already catches it, but only as
+    "not well-formed (invalid token): line 24, column 30", which says
+    nothing about the cause. This says the cause.
+    """
+    text = io.open(XAML_PATH, encoding="utf-8").read()
+    offenders = []
+    for match in re.finditer(r"<!--(.*?)-->", text, flags=re.DOTALL):
+        if re.search(r"-{2,}", match.group(1)):
+            line = text[:match.start()].count("\n") + 1
+            offenders.append(line)
+    assert not offenders, (
+        "XAML comment(s) starting at line(s) %s contain '--', which is "
+        "illegal inside an XML comment and makes the file unparseable. "
+        "Use a single hyphen in XAML comments; '--' is fine in the Python "
+        "comments next door, which is exactly why this keeps happening."
+        % offenders
     )
