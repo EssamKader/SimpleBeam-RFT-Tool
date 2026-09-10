@@ -217,6 +217,29 @@ CASES = [
      "boxes  # place_labels(boxes, width_px, height_px)",
      T + "test_every_label_is_placed_through_the_tested_layout_module",
      "label placement inlined back into the renderer"),
+
+    # #54 (U10). The rule that a restore cannot arm Place holds because
+    # four inputs are never stored. tests/test_ui_persistence.py proves
+    # that against the real derivation -- but it can only see the field
+    # LISTS. A script that slipped a withheld field in on its way past
+    # would leave the pure module looking perfectly correct.
+    (SCRIPT, "                self._persistable_type_ids(),",
+     '                dict(self._persistable_type_ids(),\n'
+     '                     crack_bar_type="resurrected"),',
+     T + "test_the_script_persists_only_what_the_persistence_module_allows",
+     "the script persisting a field that would arm Place"),
+
+    (SCRIPT, "ui_persistence.SETTINGS_SLOT, data, this_project=True)",
+     "ui_persistence.SETTINGS_SLOT, data, this_project=False)",
+     T + "test_settings_are_stored_per_project_and_never_globally",
+     "one job's conventions leaking into every other job"),
+
+    # pyRevit's load_data opens the file directly and RAISES when nothing
+    # has been stored -- which is the normal first run on any project.
+    (SCRIPT, "            if not script.data_exists(",
+     "            if False and script.data_exists(",
+     T + "test_a_first_run_checks_before_loading_stored_data",
+     "loading stored data without checking it exists"),
 ]
 
 
