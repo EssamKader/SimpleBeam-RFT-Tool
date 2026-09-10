@@ -255,6 +255,12 @@ def test_every_path_the_ci_workflow_names_exists():
         for token in shlex.split(command):
             looks_like_a_repo_path = (
                 ".extension" in token
+                # ".lib" is here because leaving it out made this guard
+                # one-directional after #64: it caught a path reverting to
+                # the old `SimpleBeamRFT.extension/lib` (that token
+                # contains ".extension") but would NOT have caught
+                # `RFT.lib` itself being mistyped or moved.
+                or ".lib" in token
                 or token.endswith(".py")
                 or token.endswith(".yaml")
                 or token.endswith(".yml"))
