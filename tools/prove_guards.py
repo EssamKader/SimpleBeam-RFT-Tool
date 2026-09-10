@@ -40,6 +40,7 @@ PLAN = "RFTBeamDetailing.extension/lib/rft/core/plan.py"
 REPORT = "RFTBeamDetailing.extension/lib/rft/ui/report.py"
 GUARDS = "RFTBeamDetailing.extension/lib/rft/core/guards.py"
 SPACING = "RFTBeamDetailing.extension/lib/rft/core/spacing.py"
+SKETCH_PALETTE = "RFTBeamDetailing.extension/lib/rft/ui/sketch_palette.py"
 T = "tests/test_detail_beam_xaml.py::"
 
 GEOM_ANCHOR = "        # an anchor.\n        self.geometry_mm = None"
@@ -82,7 +83,16 @@ CASES = [
      "test_report_and_placement_both_use_the_shared_plan",
      "report recomputing ONE of its plan calls by hand"),
 
-    (SCRIPT, "core_plan.crack_plan(", "hand_rolled_crack_plan(",
+    # #49 (U5) added a SECOND ``core_plan.crack_plan(`` call site in this
+    # file (``_sketch_crack_plan``, the live sketch's own best-effort
+    # crack plan), earlier in the file than the placer's. A bare
+    # single-occurrence replace of "core_plan.crack_plan(" now hits that
+    # one instead, leaving the placer's call untouched and this case
+    # silently unproven -- so the anchor is widened to text unique to the
+    # PLACER's call site (``_build_placement_plans``'s own local variable
+    # names), which the sketch's call does not share.
+    (SCRIPT, 'crack = core_plan.crack_plan(\n                h_mm, b_mm, cover_side_mm, stirrup_dia_mm,',
+     'crack = hand_rolled_crack_plan(\n                h_mm, b_mm, cover_side_mm, stirrup_dia_mm,',
      "test_report_and_placement_both_use_the_shared_plan",
      "placer recomputing the crack plan by hand"),
 
@@ -159,6 +169,28 @@ CASES = [
      "tests/test_guard_severity.py::"
      "test_each_guard_declares_the_severity_v0_1_0_actually_had",
      "a refusal quietly downgraded to a warning"),
+
+    # #49 (U5). The sketch's style-key -> brush mapping is data, not WPF,
+    # so it IS importable and tested directly (tests/test_ui_sketch_
+    # palette.py) -- proven anyway, since a missing/stale/mistyped entry
+    # here is exactly the class of defect that looks like correct code
+    # until it draws invisibly on a live host.
+    (SKETCH_PALETTE, '    "bar_main": "InkPrimary",\n', "",
+     "tests/test_ui_sketch_palette.py::"
+     "test_every_sketch_style_key_has_a_brush_mapping",
+     "a sketch style key with no brush mapping at all"),
+
+    (SKETCH_PALETTE, '    "caption": "InkMuted",\n}',
+     '    "caption": "InkMuted",\n    "not_a_real_style": "InkMuted",\n}',
+     "tests/test_ui_sketch_palette.py::"
+     "test_no_stale_brush_mapping_for_a_style_that_no_longer_exists",
+     "a stale mapping for a style rft.ui.sketch no longer emits"),
+
+    (SKETCH_PALETTE, '"dimension_fail": "DangerRed",',
+     '"dimension_fail": "NoSuchBrushXYZ",',
+     "tests/test_ui_sketch_palette.py::"
+     "test_every_mapped_brush_is_declared_in_the_xaml",
+     "a brush name the XAML never declares with x:Key"),
 ]
 
 

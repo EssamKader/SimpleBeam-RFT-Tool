@@ -65,6 +65,8 @@ from pyrevit import EXEC_PARAMS, forms, revit, script
 from rft.core.anchorage import (
     DEFAULT_LD_BTM_MULTIPLIER,
     DEFAULT_LD_TOP_MULTIPLIER,
+    development_length,
+    placed_clearance_mm,
 )
 from rft.core.crack_bars import (
     DEFAULT_S_MAX_MM,
@@ -76,7 +78,9 @@ from rft.core.guards import stirrup_type3_guard_message
 from rft.core.layout import (
     MAX_LAYERS,
     layer_offset_mm,
+    spacer_length_mm,
 )
+from rft.core.spacing import governing_min_spacing_mm, validate_layer_spacing
 from rft.core.grades import (
     ROLE_BOTTOM_MAIN,
     ROLE_CRACK,
@@ -137,6 +141,42 @@ from rft.revit.units import internal_to_mm, mm_to_internal
 from rft.ui import derivation as ui_derivation
 from rft.ui import inputs as ui_inputs
 from rft.ui import report as ui_report
+from rft.ui import sketch as ui_sketch
+from rft.ui.sketch_palette import brush_key_for_style
+
+# #49 (U5) -- the renderer's ONLY WPF imports for the live sketch. These
+# are plain WPF/CLR types (Line/Ellipse/Polygon/TextBlock/Points), not the
+# Revit API -- constructing them needs no API context, exactly like every
+# other direct control write already in this file (self.h_avail_tb.Text =
+# ..., etc., per docs/research/ui-wpf-hosting.md's "direct reads + one
+# explicit redraw" recommendation). Wrapped: if this import ever fails on
+# a live host (a pyRevit engine that has not loaded PresentationFramework
+# for some reason), the whole window must still open -- the sketch is a
+# verification surface, not a load-bearing part of placement.
+try:
+    from System.Windows import Point
+    from System.Windows.Media import PointCollection
+    from System.Windows.Controls import Canvas as WpfCanvas
+    from System.Windows.Controls import TextBlock as WpfTextBlock
+    from System.Windows.Shapes import Ellipse as WpfEllipse
+    from System.Windows.Shapes import Line as WpfLine
+    from System.Windows.Shapes import Polygon as WpfPolygon
+    _WPF_SHAPES_AVAILABLE = True
+except Exception:
+    _WPF_SHAPES_AVAILABLE = False
+
+# SHAPE UNVERIFIED (CONTEXT.md's fake-shape rule, applied here because this
+# code cannot be exercised at all without a Revit host, not only faked):
+# ``FrameworkElement.FindResource`` is a real WPF/.NET method and
+# ``System.Windows.Controls.Canvas.SetLeft``/``SetTop`` are real static
+# attached-property setters, per the .NET Framework documentation -- but
+# NEITHER has been called from inside a pyRevit-hosted ``WPFWindow`` in
+# this project before now. docs/research/ui-wpf-hosting.md confirms
+# ``Canvas``/``Line``/``Ellipse``/``Polygon``/``TextBlock`` construction
+# and pyRevit's own resource injection into ``WPFWindow``, but not
+# ``FindResource`` specifically, nor ``PointCollection`` construction from
+# IronPython 2.7. This whole rendering path is UNVERIFIED until it is
+# shown on a live host (see this ticket's report).
 
 output = script.get_output()
 doc = revit.doc
@@ -344,11 +384,40 @@ class DetailBeamWindow(forms.WPFWindow):
         self.top_bar_count_tb.TextChanged += self._refresh_review_derivation
         self.bottom_bar_count_tb.TextChanged += self._refresh_review_derivation
 
+        # #49 (U5) -- the live sketch redraws on every field that feeds
+        # rft.ui.sketch's inputs (A48: it draws only what rft.core already
+        # computed, so every one of THOSE fields must trigger a redraw, or
+        # the drawing goes stale the moment the engineer edits one).
+        # Wired directly, like _refresh_h_avail/_refresh_review_derivation
+        # above -- no Revit API call happens between here and the Canvas
+        # being repainted, so this needs no dispatch (#57).
+        for tb_name in (
+            "top_bar_count_tb", "bottom_bar_count_tb",
+            "top_layers_tb", "bottom_layers_tb",
+            "spacer_dia_tb", "d_agg_tb", "min_spacing_override_tb",
+            "ld_top_mult_tb", "ld_btm_mult_tb",
+            "dense_spacing_tb", "normal_spacing_tb", "crack_s_max_tb",
+            "l_tb", "b_tb", "h_tb",
+        ):
+            getattr(self, tb_name).TextChanged += self._redraw_sketches
+        self.top_face_option_combo.SelectionChanged += self._redraw_sketches
+        self.bottom_face_option_combo.SelectionChanged += self._redraw_sketches
+        self.closure_type_combo.SelectionChanged += self._redraw_sketches
+        for canvas_name in (
+            "main_bars_sketch_canvas", "stirrups_sketch_canvas",
+            "crack_bars_sketch_canvas",
+        ):
+            getattr(self, canvas_name).SizeChanged += self._redraw_sketches
+
         self._reset_beam_state(message="No beam picked yet.")
         # Sets the initial "nothing requested -- Place disabled" state
         # (this ticket's brief) -- without this call Place would open
         # enabled until the first keystroke or pick touched a wired field.
         self._refresh_review_derivation()
+        # #49 (U5) -- draws the "nothing picked yet" empty canvases rather
+        # than leaving whatever WPF's own default (blank) Canvas looks
+        # like before the first keystroke or pick touches a wired field.
+        self._redraw_sketches()
 
     # ------------------------------------------------------- bar/hook types
     def _diameter_mm(self, bar_type):
@@ -438,6 +507,9 @@ class DetailBeamWindow(forms.WPFWindow):
         # state (a main-bar face on its own type, crack bars on ITS type
         # plus both faces' types, A50).
         self._refresh_review_derivation()
+        # #49 (U5) -- a bar type's diameter feeds every layer offset and
+        # bar radius the sketch draws.
+        self._redraw_sketches()
 
     def _on_hook_type_selected(self, sender, args):
         """Rev 2 section 7.3 (A45): the selection is re-checked AFTER
@@ -453,6 +525,7 @@ class DetailBeamWindow(forms.WPFWindow):
             self.selection.stirrup_hook_type = None
             self.selection.stirrup_hook_angle_deg = None
             self._refresh_review_derivation()
+            self._redraw_sketches()
             return
         hook_type = dict(self._hook_type_options)[label]
         hook_type_name = element_name(hook_type)
@@ -466,6 +539,7 @@ class DetailBeamWindow(forms.WPFWindow):
             sender.SelectedIndex = -1
             self.selection.stirrup_hook_type = None
             self._refresh_review_derivation()
+            self._redraw_sketches()
             return
         style_violation = hook_style_guard_message(style, hook_type_name=hook_type_name)
         if style_violation:
@@ -473,6 +547,7 @@ class DetailBeamWindow(forms.WPFWindow):
             sender.SelectedIndex = -1
             self.selection.stirrup_hook_type = None
             self._refresh_review_derivation()
+            self._redraw_sketches()
             return
 
         angle_deg = hook_angle_deg(hook_type)
@@ -501,6 +576,7 @@ class DetailBeamWindow(forms.WPFWindow):
                 sender.SelectedIndex = -1
                 self.selection.stirrup_hook_type = None
                 self._refresh_review_derivation()
+                self._redraw_sketches()
                 return
             # Nothing wrong to report, so this red status line goes quiet.
             # The POSITIVE confirmation ("angle read back = 135.0") is the
@@ -514,6 +590,7 @@ class DetailBeamWindow(forms.WPFWindow):
         # (never the main-bar-type handlers) can flip the stirrups section's
         # requested state.
         self._refresh_review_derivation()
+        self._redraw_sketches()
 
     # --------------------------------------------------- U4 reinforcement tabs
     def _populate_reinforcement_tab_defaults(self):
@@ -745,6 +822,360 @@ class DetailBeamWindow(forms.WPFWindow):
             )
         self.review_derivation_tb.Text = "\n".join(lines)
         self.place_btn.IsEnabled = review.any_requested
+
+    # --------------------------------------------------------- U5 sketch
+    #
+    # #49. Every dimension drawn here is sourced from rft.core (A48) --
+    # this file composes and positions; it derives nothing. Touches NO
+    # Revit API: every value read below is either a plain number already
+    # stored on self (from a prior pick, or the CACHED support detection
+    # -- see the assignment inside _pick_beam_in_context) or a TextBox's
+    # raw text, parsed by rft.ui.inputs. Nothing here needs
+    # execute_in_revit_context (#57), exactly like _refresh_h_avail.
+    #
+    # NEVER RAISES OUT: a half-typed or empty field must leave the
+    # previous drawing (or a blank canvas) on screen rather than kill the
+    # window (this ticket's acceptance criterion) -- each canvas is
+    # rebuilt inside its own try/except so one tab's bad input cannot
+    # blank another tab's drawing.
+
+    def _clear_canvas(self, canvas):
+        try:
+            canvas.Children.Clear()
+        except Exception:
+            pass
+
+    def _redraw_sketches(self, sender=None, args=None):
+        if not _WPF_SHAPES_AVAILABLE:
+            return
+        try:
+            self._redraw_section_canvas(self.main_bars_sketch_canvas, want_crack=False)
+        except Exception:
+            self._clear_canvas(self.main_bars_sketch_canvas)
+        try:
+            self._redraw_section_canvas(self.crack_bars_sketch_canvas, want_crack=True)
+        except Exception:
+            self._clear_canvas(self.crack_bars_sketch_canvas)
+        try:
+            self._redraw_elevation_canvas(self.stirrups_sketch_canvas)
+        except Exception:
+            self._clear_canvas(self.stirrups_sketch_canvas)
+
+    def _sketch_common_inputs(self):
+        """b/h/covers/stirrup diameter, or ``None`` when any is missing or
+        unparseable -- the shared minimum every sketch view needs.
+        """
+        if self.beam is None or self.beam_covers_mm is None:
+            return None
+        b_mm = ui_inputs.try_parse_float(self.b_tb.Text)
+        h_mm = ui_inputs.try_parse_float(self.h_tb.Text)
+        stirrup_dia_mm = self._diameter_mm(self.selection.stirrup_bar_type)
+        if b_mm is None or h_mm is None or stirrup_dia_mm is None:
+            return None
+        return {
+            "b_mm": b_mm, "h_mm": h_mm,
+            "cover_top_mm": self.beam_covers_mm.top_mm,
+            "cover_btm_mm": self.beam_covers_mm.bottom_mm,
+            "cover_side_mm": self.beam_covers_mm.side_mm,
+            "stirrup_dia_mm": stirrup_dia_mm,
+        }
+
+    def _sketch_face_data(self, is_top, common):
+        """One face's (bar_dia_mm, layers, spacing_results), or
+        (None, [], None) when the face is not usably detailed yet.
+
+        ``layers`` is a list of ``rft.core.plan.LayerPlan`` --
+        ``core_plan.face_layer_plans``, the SAME function
+        ``_build_placement_plans`` and ``rft.ui.report`` call, so the
+        sketch cannot draw a bar position that disagrees with either.
+        """
+        bar_type = (
+            self.selection.top_main_bar_type if is_top
+            else self.selection.bottom_main_bar_type
+        )
+        bar_dia_mm = self._diameter_mm(bar_type)
+        count = self._try_parse_optional_int(
+            (self.top_bar_count_tb if is_top else self.bottom_bar_count_tb).Text,
+            "bar count per layer",
+        )
+        layer_count = self._try_parse_optional_int(
+            (self.top_layers_tb if is_top else self.bottom_layers_tb).Text,
+            "layer count",
+        )
+        if bar_dia_mm is None or count is None or layer_count is None or count < 2:
+            return None, [], None
+        try:
+            spacer_dia_mm = ui_inputs.parse_positive_float(self.spacer_dia_tb.Text, "O_spacer")
+        except ValueError:
+            return None, [], None
+        cover_face_mm = common["cover_top_mm"] if is_top else common["cover_btm_mm"]
+        try:
+            layers = core_plan.face_layer_plans(
+                is_top, common["h_mm"], common["b_mm"], cover_face_mm,
+                common["cover_side_mm"], common["stirrup_dia_mm"], bar_dia_mm,
+                spacer_dia_mm, count, layer_count,
+            )
+        except ValueError:
+            return None, [], None
+        d_agg_mm = ui_inputs.try_parse_float(self.d_agg_tb.Text)
+        override_mm = ui_inputs.try_parse_float(self.min_spacing_override_tb.Text)
+        governing_min_mm = governing_min_spacing_mm(bar_dia_mm, d_agg_mm, override_mm)
+        spacing_results = [
+            validate_layer_spacing(
+                layer.layer_n, count, common["b_mm"], common["cover_side_mm"],
+                common["stirrup_dia_mm"], bar_dia_mm, governing_min_mm,
+            )
+            for layer in layers
+        ]
+        return bar_dia_mm, layers, spacing_results
+
+    def _sketch_crack_plan(self, common):
+        """An ``rft.core.plan.CrackPlan``, or ``None`` when crack bars are
+        not triggered/detailed yet (A50) -- same trigger and same
+        innermost-layer-offset function ``_build_placement_plans`` uses.
+        """
+        if not crack_reinforcement_triggered(common["h_mm"]):
+            return None
+        top_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
+        crack_dia_mm = self._diameter_mm(self.selection.crack_bar_type)
+        layers_top = self._try_parse_optional_int(self.top_layers_tb.Text, "top layers")
+        layers_btm = self._try_parse_optional_int(self.bottom_layers_tb.Text, "bottom layers")
+        if None in (top_dia_mm, btm_dia_mm, crack_dia_mm, layers_top, layers_btm):
+            return None
+        try:
+            spacer_dia_mm = ui_inputs.parse_positive_float(self.spacer_dia_tb.Text, "O_spacer")
+            s_max_mm = ui_inputs.parse_positive_float(self.crack_s_max_tb.Text, "s_max")
+        except ValueError:
+            return None
+        offset_top_mm = core_plan.innermost_layer_offset_mm(
+            common["cover_top_mm"], common["stirrup_dia_mm"], top_dia_mm,
+            spacer_dia_mm, layers_top,
+        )
+        offset_btm_mm = core_plan.innermost_layer_offset_mm(
+            common["cover_btm_mm"], common["stirrup_dia_mm"], btm_dia_mm,
+            spacer_dia_mm, layers_btm,
+        )
+        try:
+            return core_plan.crack_plan(
+                common["h_mm"], common["b_mm"], common["cover_side_mm"],
+                common["stirrup_dia_mm"], crack_dia_mm,
+                offset_top_mm, offset_btm_mm, s_max_mm,
+            )
+        except ValueError:
+            return None
+
+    def _redraw_section_canvas(self, canvas, want_crack):
+        common = self._sketch_common_inputs()
+        if common is None:
+            self._clear_canvas(canvas)
+            return
+        top_dia_mm, top_layers, top_spacing = self._sketch_face_data(True, common)
+        bottom_dia_mm, bottom_layers, bottom_spacing = self._sketch_face_data(False, common)
+        spacer_len_mm = None
+        if (len(top_layers) >= 2) or (len(bottom_layers) >= 2):
+            spacer_len_mm = spacer_length_mm(
+                common["b_mm"], common["cover_side_mm"], common["stirrup_dia_mm"]
+            )
+        crack_plan_obj = self._sketch_crack_plan(common) if want_crack else None
+        crack_dia_mm = (
+            self._diameter_mm(self.selection.crack_bar_type)
+            if crack_plan_obj is not None else None
+        )
+        shapes = ui_sketch.section_shapes(
+            common["b_mm"], common["h_mm"],
+            common["cover_top_mm"], common["cover_btm_mm"], common["cover_side_mm"],
+            common["cover_top_mm"], common["stirrup_dia_mm"],
+            top_bar_dia_mm=top_dia_mm, top_layers=top_layers or None,
+            top_spacing=top_spacing,
+            bottom_bar_dia_mm=bottom_dia_mm, bottom_layers=bottom_layers or None,
+            bottom_spacing=bottom_spacing,
+            spacer_length_mm=spacer_len_mm,
+            crack_dia_mm=crack_dia_mm, crack_plan=crack_plan_obj,
+        )
+        self._draw_shapes(canvas, shapes)
+
+    def _sketch_end_plans(self, is_top, dia_own_mm, dia_other_mm, ld_text, ld_label,
+                          detection, support_width_start_mm, support_width_end_mm):
+        if dia_own_mm is None:
+            return None, None
+        try:
+            ld_mult = ui_inputs.parse_positive_float(ld_text, ld_label)
+        except ValueError:
+            return None, None
+        ld_mm = development_length(dia_own_mm, ld_mult)
+        try:
+            start = core_plan.end_plan(
+                detection["is_supported_start"], is_top, support_width_start_mm,
+                detection["support_cover_start_mm"], dia_own_mm, dia_other_mm,
+                ld_mm, None, "start",
+            )
+            end = core_plan.end_plan(
+                detection["is_supported_end"], is_top, support_width_end_mm,
+                detection["support_cover_end_mm"], dia_own_mm, dia_other_mm,
+                ld_mm, None, "end",
+            )
+        except Exception:
+            return None, None
+        return start, end
+
+    def _redraw_elevation_canvas(self, canvas):
+        common = self._sketch_common_inputs()
+        # DELIBERATELY reads the CACHED detection only -- never
+        # ``self._detect_supports()``, which calls the Revit API on its
+        # first miss and would raise InvalidOperationException from this
+        # UI-thread handler (#57). The cache is populated inside
+        # ``_pick_beam_in_context``, which already runs in an API context.
+        detection = self._support_detection
+        if common is None or not detection or "error" in detection:
+            self._clear_canvas(canvas)
+            return
+        l_mm = detection["l_mm"]
+        support_width_start_mm = detection["support_width_start_mm"]
+        support_width_end_mm = detection["support_width_end_mm"]
+        if l_mm is None or support_width_start_mm is None or support_width_end_mm is None:
+            self._clear_canvas(canvas)
+            return
+
+        stirrup_plan_obj = None
+        try:
+            closure_type = ui_inputs.closure_type_from_label(
+                self.closure_type_combo.SelectedItem
+            )
+            dense_mm = ui_inputs.parse_positive_float(self.dense_spacing_tb.Text, "Dense spacing")
+            normal_mm = ui_inputs.parse_positive_float(self.normal_spacing_tb.Text, "Normal spacing")
+            if closure_type is not None:
+                stirrup_plan_obj = core_plan.stirrup_plan(
+                    l_mm, common["b_mm"], common["h_mm"], common["cover_top_mm"],
+                    common["stirrup_dia_mm"], closure_type, dense_mm, normal_mm,
+                    support_width_start_mm / 2.0, support_width_end_mm / 2.0,
+                )
+        except (ValueError, TypeError):
+            stirrup_plan_obj = None
+
+        top_dia_mm = self._diameter_mm(self.selection.top_main_bar_type)
+        btm_dia_mm = self._diameter_mm(self.selection.bottom_main_bar_type)
+        top_end_start, top_end_end = self._sketch_end_plans(
+            True, top_dia_mm, btm_dia_mm, self.ld_top_mult_tb.Text,
+            "LD_top multiplier", detection, support_width_start_mm, support_width_end_mm,
+        )
+        bottom_end_start, bottom_end_end = self._sketch_end_plans(
+            False, btm_dia_mm, top_dia_mm, self.ld_btm_mult_tb.Text,
+            "LD_btm multiplier", detection, support_width_start_mm, support_width_end_mm,
+        )
+
+        clearance_start = clearance_end = None
+        for pair, attr in (
+            ((top_end_start, bottom_end_start), "clearance_start"),
+            ((top_end_end, bottom_end_end), "clearance_end"),
+        ):
+            top_end, bottom_end = pair
+            if (top_end is not None and bottom_end is not None
+                    and top_end.a_mm is not None and bottom_end.a_mm is not None):
+                clearance = placed_clearance_mm(
+                    bottom_end.a_mm, top_end.a_mm, top_dia_mm, btm_dia_mm
+                )
+                if attr == "clearance_start":
+                    clearance_start = clearance
+                else:
+                    clearance_end = clearance
+
+        crack_plan_obj = self._sketch_crack_plan(common)
+
+        shapes = ui_sketch.elevation_shapes(
+            l_mm, support_width_start_mm, support_width_end_mm, common["h_mm"],
+            top_end_start=top_end_start, top_end_end=top_end_end,
+            bottom_end_start=bottom_end_start, bottom_end_end=bottom_end_end,
+            stirrup_plan=stirrup_plan_obj,
+            clearance_start=clearance_start, clearance_end=clearance_end,
+            crack_plan=crack_plan_obj,
+        )
+        self._draw_shapes(canvas, shapes)
+
+    def _draw_shapes(self, canvas, shapes):
+        """The ONE place mm becomes pixels (the coordinate transform A48
+        allows the renderer to own) and shapes become WPF children. No
+        detailing arithmetic: every u/v/r/text here is read verbatim off
+        an ``rft.ui.sketch`` shape, never derived.
+
+        ``translate(cx, cy) scale(s, -s)`` (this ticket's coordinate
+        convention): origin at the section centroid, v positive UP.
+        """
+        canvas.Children.Clear()
+        if not shapes:
+            return
+        us, vs = [], []
+        for shape in shapes:
+            if isinstance(shape, ui_sketch.SketchLine):
+                us += [shape.u1, shape.u2]
+                vs += [shape.v1, shape.v2]
+            elif isinstance(shape, ui_sketch.SketchCircle):
+                us += [shape.u - shape.r, shape.u + shape.r]
+                vs += [shape.v - shape.r, shape.v + shape.r]
+            elif isinstance(shape, ui_sketch.SketchText):
+                us.append(shape.u)
+                vs.append(shape.v)
+            elif isinstance(shape, ui_sketch.SketchPolygon):
+                for u, v in shape.points:
+                    us.append(u)
+                    vs.append(v)
+        if not us or not vs:
+            return
+
+        margin_mm = 30.0
+        min_u, max_u = min(us) - margin_mm, max(us) + margin_mm
+        min_v, max_v = min(vs) - margin_mm, max(vs) + margin_mm
+
+        width_px = canvas.ActualWidth if canvas.ActualWidth > 0 else 400.0
+        height_px = canvas.ActualHeight if canvas.ActualHeight > 0 else 240.0
+        span_u = max(max_u - min_u, 1.0)
+        span_v = max(max_v - min_v, 1.0)
+        scale = min(width_px / span_u, height_px / span_v)
+        cx = width_px / 2.0 - (min_u + max_u) / 2.0 * scale
+        cy = height_px / 2.0 + (min_v + max_v) / 2.0 * scale
+
+        def to_px(u_mm, v_mm):
+            return cx + u_mm * scale, cy - v_mm * scale
+
+        for shape in shapes:
+            brush = self.FindResource(brush_key_for_style(shape.style))
+            if isinstance(shape, ui_sketch.SketchLine):
+                x1, y1 = to_px(shape.u1, shape.v1)
+                x2, y2 = to_px(shape.u2, shape.v2)
+                line = WpfLine()
+                line.X1, line.Y1, line.X2, line.Y2 = x1, y1, x2, y2
+                line.Stroke = brush
+                line.StrokeThickness = 1.4
+                canvas.Children.Add(line)
+            elif isinstance(shape, ui_sketch.SketchCircle):
+                x, y = to_px(shape.u, shape.v)
+                r_px = shape.r * scale
+                ellipse = WpfEllipse()
+                ellipse.Width = 2.0 * r_px
+                ellipse.Height = 2.0 * r_px
+                WpfCanvas.SetLeft(ellipse, x - r_px)
+                WpfCanvas.SetTop(ellipse, y - r_px)
+                ellipse.Fill = brush
+                canvas.Children.Add(ellipse)
+            elif isinstance(shape, ui_sketch.SketchPolygon):
+                points = PointCollection()
+                for u_mm, v_mm in shape.points:
+                    x, y = to_px(u_mm, v_mm)
+                    points.Add(Point(x, y))
+                polygon = WpfPolygon()
+                polygon.Points = points
+                polygon.Stroke = brush
+                polygon.StrokeThickness = 1.2
+                canvas.Children.Add(polygon)
+            elif isinstance(shape, ui_sketch.SketchText):
+                x, y = to_px(shape.u, shape.v)
+                text_block = WpfTextBlock()
+                text_block.Text = shape.text
+                text_block.FontSize = 10.0
+                text_block.Foreground = brush
+                WpfCanvas.SetLeft(text_block, x)
+                WpfCanvas.SetTop(text_block, y)
+                canvas.Children.Add(text_block)
 
     def on_build_report_click(self, sender, args):
         """WPF click handler. Does no Revit work itself (#57) -- the full
@@ -1024,6 +1455,13 @@ class DetailBeamWindow(forms.WPFWindow):
         # not for a beam being un-picked outright.
         self.crack_bars_tab.IsEnabled = False
         self.h_avail_tb.Text = ui_inputs.no_beam_picked_h_avail_message()
+        # #49 (U5) -- a reset/refused pick must blank the sketches too, or
+        # a stale drawing of the PREVIOUS beam would sit on screen with
+        # nothing to indicate it belongs to a beam that is no longer
+        # picked -- the same "beam-scoped state must not survive a
+        # re-pick" rule this method exists to enforce for every other
+        # field on this tab.
+        self._redraw_sketches()
 
     # ------------------------------------------- Revit API context (#57)
     def _dispatch_to_revit_context(self, func, action_label):
@@ -1198,6 +1636,30 @@ class DetailBeamWindow(forms.WPFWindow):
         # --- everything above succeeded: populate and enable the fields.
         self.beam = beam
         self.host_data = host_data
+        # #49 (U5) -- caches EXACTLY what _detect_supports_uncached would
+        # have computed, from the scan this method already ran, so the
+        # live sketch (which must never call the Revit API outside this
+        # dispatched context, #57) can read the plain-number fields
+        # (is_supported_*, support_width_*_mm, l_mm) straight off
+        # self._support_detection without triggering a second scan or an
+        # InvalidOperationException from the UI thread.
+        self._support_detection = {
+            "support_start": support_start,
+            "support_end": support_end,
+            "start_pt": start_pt,
+            "end_pt": end_pt,
+            "axis": axis,
+            "is_supported_start": is_supported_start,
+            "is_supported_end": is_supported_end,
+            "support_width_start_mm": support_width_start_mm,
+            "support_width_end_mm": support_width_end_mm,
+            "support_cover_start_mm": support_cover_start_mm,
+            "support_cover_end_mm": support_cover_end_mm,
+            "l_mm": (
+                span_length_mm(support_start, support_end, internal_to_mm)
+                if is_supported_start and is_supported_end else None
+            ),
+        }
         # #48 -- set BEFORE ``h_tb.Text`` below, whose ``TextChanged`` fires
         # ``_on_h_or_layout_changed`` -> ``_refresh_h_avail`` immediately:
         # H_avail needs ``self.beam_covers_mm`` already set to compute
@@ -1228,6 +1690,10 @@ class DetailBeamWindow(forms.WPFWindow):
             is_supported_end, support_width_end_mm, support_cover_end_mm
         )
         self.geometry_panel.IsEnabled = True
+        # #49 (U5) -- the fields above are what the sketch's own inputs
+        # are read from; a successful pick is exactly the moment they
+        # first exist.
+        self._redraw_sketches()
 
     # ------------------------------------------------------------- place
     def _build_placement_plans(self, review, geometry):

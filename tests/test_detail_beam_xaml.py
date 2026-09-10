@@ -59,6 +59,11 @@ NON_XAML_SELF_ATTRS = {
     # method (pyRevit's own helper for the title-bar icon). Both are real
     # attributes and neither is an x:Name control.
     "set_icon",
+    # #49 (U5) -- FrameworkElement.FindResource, a real inherited WPF/.NET
+    # method (DetailBeamWindow -> forms.WPFWindow -> Window ->
+    # FrameworkElement) used by the sketch renderer to look up a brush by
+    # its x:Key name. Not an x:Name control itself.
+    "FindResource",
 }
 
 # This exclusion list is a maintenance cost, and deliberately so: a new
