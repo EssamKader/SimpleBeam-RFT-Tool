@@ -58,7 +58,9 @@ introduce the A46 stirrup-diameter mismatch because there is only one
 place a stirrup ``RebarBarType`` can come from.
 """
 
-from pyrevit import forms, revit, script
+import os
+
+from pyrevit import EXEC_PARAMS, forms, revit, script
 
 from rft.core.anchorage import (
     DEFAULT_LD_BTM_MULTIPLIER,
@@ -301,6 +303,19 @@ class DetailBeamWindow(forms.WPFWindow):
         self._api_call_in_flight = False
         self._bar_type_options_by_role = {}
         self._hook_type_options = []
+
+        # The window's TITLE-BAR icon, which is a different property from
+        # the ribbon button's artwork: pyRevit reads icon.png for the
+        # button when it builds the ribbon, but a WPFWindow keeps WPF's
+        # default until told otherwise. Same file, so the two cannot drift.
+        #
+        # WRAPPED, deliberately: bitmap_from_file raises on a bad path, and
+        # a missing decoration must never stop the tool opening. The window
+        # is the product; the icon is not.
+        try:
+            self.set_icon(os.path.join(EXEC_PARAMS.command_path, "icon.png"))
+        except Exception:
+            pass
 
         self.pick_btn.Click += self.on_pick_click
         self.place_btn.Click += self.on_place_click

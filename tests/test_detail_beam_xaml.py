@@ -48,6 +48,12 @@ NON_XAML_SELF_ATTRS = {
     # this check reads source text, not live attributes, which is the
     # trade for being able to run it at all without a Revit host.
     "_api_call_in_flight", "Dispatcher",
+    # INHERITED WPFWindow members. ``_script_method_names()`` only finds
+    # methods DEFINED in this file, so anything the base class provides
+    # has to be named here: Dispatcher above is a property, set_icon is a
+    # method (pyRevit's own helper for the title-bar icon). Both are real
+    # attributes and neither is an x:Name control.
+    "set_icon",
 }
 
 # This exclusion list is a maintenance cost, and deliberately so: a new
