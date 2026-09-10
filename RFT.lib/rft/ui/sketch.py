@@ -94,6 +94,37 @@ STYLE_KEYS = frozenset([
 ])
 
 
+# issue #65: the short field names ``rft.ui.derivation.
+# main_bar_face_gap`` returns, abbreviated to the same budget
+# issue #62 already set for every other caption on this canvas (~20-30
+# characters, not the Review tab's full sentence). "bar count" is never
+# in ``missing`` (a gap only fires when the count IS present), but the
+# mapping stays defensive rather than assuming that invariant here too.
+_MISSING_FIELD_SHORT = {
+    "bar type": "type",
+    "bar count": "count",
+    "layer count": "layers",
+}
+
+
+def missing_face_label(face_label, missing):
+    """A short caption (issue #65) naming a main face that REFUSES Place
+    and which of its inputs the refusal is about -- so a face that draws
+    no bars because it refuses is distinguishable from one nobody asked
+    for, rather than the two looking identical (both draw nothing).
+
+    ``missing`` is the tuple ``rft.ui.derivation.main_bar_face_gap``
+    returns; pass ``()`` for a face that does not refuse (fully blank,
+    fully filled, or a type/layers present with no count -- #54's
+    restored-beam state), which returns ``None`` -- drawing nothing, same
+    as today, because none of those states is an error worth a caption.
+    """
+    if not missing:
+        return None
+    fields = "/".join(_MISSING_FIELD_SHORT.get(m, m) for m in missing)
+    return "{}: no {}".format(face_label, fields)
+
+
 def _rect_points(width_mm, height_mm, cu_mm=0.0, cv_mm=0.0):
     """The four corners of a ``width_mm`` x ``height_mm`` rectangle
     centred at ``(cu_mm, cv_mm)``, in a fixed winding order.
@@ -114,7 +145,8 @@ def section_shapes(b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
                     top_bar_dia_mm=None, top_layers=None, top_spacing=None,
                     bottom_bar_dia_mm=None, bottom_layers=None, bottom_spacing=None,
                     spacer_length_mm=None,
-                    crack_dia_mm=None, crack_plan=None):
+                    crack_dia_mm=None, crack_plan=None,
+                    top_missing=(), bottom_missing=()):
     """Every drawn element of the cross-section (docs/ui/sketch-notation.svg
     section 1), true scale, at the section centroid.
 
@@ -142,6 +174,15 @@ def section_shapes(b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
 
     ``crack_plan`` is an ``rft.core.plan.CrackPlan``, or ``None`` when
     crack bars are not requested/triggered (A50).
+
+    ``top_missing``/``bottom_missing`` are the ``missing`` tuples
+    ``rft.ui.derivation.main_bar_face_gap`` returns for that face, or
+    ``()`` when it does not refuse (issue #65) -- a caption naming the
+    missing input(s) is drawn in place of the bars this function would
+    otherwise silently not draw, via ``missing_face_label``. A face that
+    is fully blank, fully filled, or has a type/layers with no count
+    (#54's restored-beam state) passes ``()`` here too and draws no
+    caption, matching its existing silent behaviour.
     """
     shapes = []
     half_b, half_h = b_mm / 2.0, h_mm / 2.0
@@ -204,6 +245,20 @@ def section_shapes(b_mm, h_mm, cover_top_mm, cover_btm_mm, cover_side_mm,
                     ),
                     style,
                 ))
+
+    # 4b: a face that REFUSES Place (issue #65) draws no bars above --
+    # ``layers`` is empty for it, same as a fully blank face -- so this
+    # names WHICH inputs the refusal is about, right where the bars would
+    # have been, so the two states are no longer visually identical. A
+    # face that does not refuse passes ``()`` and draws nothing here,
+    # unchanged.
+    for face_label, missing, cover_v_mm, sign in (
+        ("Top", top_missing, cover_top_v_mm, -1.0),
+        ("Bottom", bottom_missing, cover_bottom_mm, 1.0),
+    ):
+        label = missing_face_label(face_label, missing)
+        if label is not None:
+            shapes.append(SketchText(0.0, cover_v_mm + sign * 10.0, label, "caption"))
 
     # 5: spacer bar, between the first two stacked layers of a face that
     # has 2+ layers (section 6.3) -- length is the caller-supplied

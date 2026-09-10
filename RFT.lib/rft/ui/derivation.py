@@ -50,6 +50,20 @@ ReviewDerivation = namedtuple(
     ["top_main", "bottom_main", "stirrups", "crack_bars", "any_requested"],
 )
 
+# A main face's gap (issue #65), distinct from ``main_bar_face_derivation``'s
+# two-field REQUESTED/NOT-REQUESTED rule. ``missing`` names, in the fixed
+# order (bar type, layer count), whichever of those two the refusal is
+# about -- a bar count is never named here, because a refusal only ever
+# fires when a bar count IS present (see ``main_bar_face_gap``).
+FaceGap = namedtuple("FaceGap", ["refuses", "missing"])
+
+# This is not itself a numbered rev 2 rule -- it is A42's no-silent-
+# fallback principle (rev 2 section 1.1) applied to a gap A42 did not
+# originally cover: a face left PARTLY entered. Cited the same way
+# ``rft.core.grades.BAR_TYPE_SELECTION_SPEC_SECTION`` cites A42 for a
+# missing bar type selection.
+FACE_GAP_SPEC_SECTION = "rev 2 section 1.1 (A42) -- issue #65"
+
 
 def main_bar_face_derivation(face_label, bar_type_selected, bar_count):
     """One face's requested/not-requested state (this ticket's rule):
@@ -69,6 +83,46 @@ def main_bar_face_derivation(face_label, bar_type_selected, bar_count):
     return SectionDerivation(
         False, "{}: not requested ({}).".format(face_label, ", ".join(missing))
     )
+
+
+def main_bar_face_gap(bar_type_selected, bar_count, layer_count):
+    """Whether one main face REFUSES Place (issue #65, corrected rule).
+
+    The bar COUNT is the statement of intent for a face; a bar TYPE or a
+    LAYER COUNT present alone is not, because either can be a leftover, a
+    default, or a value #54's persistence restored on purpose while
+    withholding the count (see ``tests/test_ui_persistence.py``'s
+    ``test_a_full_restore_leaves_every_section_not_requested`` and this
+    module's own regression test against it). So this function refuses a
+    face ONLY when a bar count IS entered and either the bar type or the
+    layer count for that SAME face is still missing -- never on a bar
+    type or layer count present without a count, however it got there.
+
+    This is deliberately ASYMMETRIC with ``main_bar_face_derivation``'s
+    two-field REQUESTED rule: a count with a type but no layers is
+    REQUESTED (by that rule) yet still refuses here, because it is the
+    exact shape that reaches ``core.plan.face_plan`` and raises
+    ``TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'``
+    from inside an open transaction (confirmed directly against
+    ``face_plan``; see ``tests/test_ui_derivation.py``). A count with
+    neither type nor layers refuses too, naming both. Every other
+    combination -- including a type and layers present with NO count, the
+    exact #54 restored-beam state -- is silent.
+
+    Returns a ``FaceGap``: ``refuses`` is ``True`` only when ``bar_count``
+    is not ``None`` and at least one of {bar type, layer count} is
+    missing; ``missing`` names, in the fixed order (bar type, layer
+    count), whichever of those two is absent -- never "bar count", since
+    a refusal only ever fires when the count IS present.
+    """
+    if bar_count is None:
+        return FaceGap(False, ())
+    missing = []
+    if bar_type_selected is None:
+        missing.append("bar type")
+    if layer_count is None:
+        missing.append("layer count")
+    return FaceGap(bool(missing), tuple(missing))
 
 
 def stirrups_derivation(hook_type_selected):

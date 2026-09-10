@@ -212,6 +212,66 @@ def test_no_crack_plan_draws_no_crack_bars():
     assert "bar_crack" not in _all_styles(shapes)
 
 
+# --- face-gap captions (issue #65, corrected rule) ---------------------------
+#
+# ``missing`` here is always what ``rft.ui.derivation.main_bar_face_gap``
+# actually produces for a refusing face: a non-empty subset of
+# {"bar type", "layer count"} -- never "bar count", since a gap only ever
+# fires when the count IS present. ``()`` stands for every face that does
+# NOT refuse: fully blank, fully filled, or a type/layers with no count
+# (the #54 restored-beam state) -- all three must stay silent.
+
+
+def test_missing_face_label_none_when_nothing_missing():
+    assert sketch.missing_face_label("Top", ()) is None
+
+
+def test_missing_face_label_names_face_and_both_missing_fields():
+    label = sketch.missing_face_label("Bottom", ("bar type", "layer count"))
+    assert label == "Bottom: no type/layers"
+
+
+def test_missing_face_label_names_face_and_one_missing_field():
+    label = sketch.missing_face_label("Top", ("bar type",))
+    assert label == "Top: no type"
+
+
+def test_missing_face_label_is_short():
+    # Issue #62's budget: the longest label on this canvas is ~20-30
+    # characters, not the Review tab's full sentence.
+    label = sketch.missing_face_label("Bottom", ("bar type", "layer count"))
+    assert len(label) <= 30
+
+
+def test_section_shapes_draws_no_caption_for_a_face_that_does_not_refuse():
+    # #65's corrected rule: a face with () passed (blank, filled, or the
+    # #54 restored-but-uncounted state) must stay silent.
+    shapes = sketch.section_shapes(
+        B_MM, H_MM, COVER_MM, COVER_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        top_missing=(), bottom_missing=(),
+    )
+    assert "caption" not in _all_styles(shapes)
+
+
+def test_section_shapes_draws_a_caption_for_a_refusing_face():
+    shapes = sketch.section_shapes(
+        B_MM, H_MM, COVER_MM, COVER_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        bottom_missing=("bar type", "layer count"),
+    )
+    captions = [s for s in shapes if s.style == "caption"]
+    assert len(captions) == 1
+    assert captions[0].text == "Bottom: no type/layers"
+
+
+def test_section_shapes_refusing_captions_are_independent_per_face():
+    shapes = sketch.section_shapes(
+        B_MM, H_MM, COVER_MM, COVER_MM, COVER_MM, COVER_MM, STIRRUP_DIA_MM,
+        top_missing=("layer count",), bottom_missing=("bar type",),
+    )
+    captions = sorted(s.text for s in shapes if s.style == "caption")
+    assert captions == ["Bottom: no type", "Top: no layers"]
+
+
 def test_spacer_bar_spans_between_the_two_stacked_layers():
     bottom = _face(False, layer_count=2).layers
     from rft.core.layout import spacer_length_mm

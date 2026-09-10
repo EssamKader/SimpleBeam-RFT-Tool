@@ -1162,3 +1162,129 @@ def test_the_version_file_matches_the_newest_changelog_entry():
         "bumped without the other, so the window would name the wrong build"
         % (version, headings[0])
     )
+
+
+def test_place_preflight_checks_face_gaps_before_the_transaction_opens():
+    """#65 -- a main face with a bar count entered but missing its bar
+    type and/or layer count must REFUSE Place, not be silently detailed
+    as if it were blank. Modelled directly on
+    ``test_place_preflight_checks_spacing_before_the_transaction_opens``
+    (#61) above: script.py cannot be imported (it imports pyrevit), so
+    this parses it with ast, and requires the call and its gate to be
+    DIRECT statements of on_place_click's own body -- #61's round 3 found
+    that reachability through an enclosing if/try/with/loop cannot be
+    proven from the AST, only the absence of an enclosing block can.
+    """
+    import ast
+
+    tree = ast.parse(io.open(SCRIPT_PATH, encoding="utf-8").read())
+    method = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "on_place_click":
+            method = node
+    assert method is not None, "on_place_click is gone"
+
+    def _calls(node):
+        found = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                func = child.func
+                if isinstance(func, ast.Attribute):
+                    found.add(func.attr)
+                elif isinstance(func, ast.Name):
+                    found.add(func.id)
+        return found
+
+    assert "_face_gap_messages" in _calls(method), (
+        "on_place_click never calls the issue #65 face-gap preflight"
+    )
+    assert "_dispatch_to_revit_context" in _calls(method), (
+        "_dispatch_to_revit_context is gone -- rewrite this guard against "
+        "whatever now opens the transaction"
+    )
+
+    face_gap_call_linenos = [
+        child.lineno for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "_face_gap_messages"
+    ]
+    dispatch_call_linenos = [
+        child.lineno for child in ast.walk(method)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == "_dispatch_to_revit_context"
+    ]
+    assert face_gap_call_linenos and dispatch_call_linenos
+    assert max(face_gap_call_linenos) < min(dispatch_call_linenos), (
+        "the issue #65 face-gap preflight must run before "
+        "_dispatch_to_revit_context, not after"
+    )
+
+    assign = None
+    for node in ast.walk(method):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            func = node.value.func
+            if isinstance(func, ast.Attribute) and func.attr == "_face_gap_messages":
+                assign = node
+    assert assign is not None, (
+        "nothing captures _face_gap_messages's return value -- a "
+        "call whose result is discarded refuses nothing"
+    )
+    assert len(assign.targets) == 1 and isinstance(assign.targets[0], ast.Name), (
+        "the preflight's result must be bound to a single plain name"
+    )
+    target_name = assign.targets[0].id
+
+    assert assign in method.body, (
+        "_face_gap_messages's assignment must be a direct "
+        "statement of on_place_click's own body -- nested inside any "
+        "if/try/with/loop, an enclosing condition could stop it running "
+        "and this guard could not prove that from the AST"
+    )
+
+    gates = [
+        node for node in method.body
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name) and node.test.id == target_name
+    ]
+    assert gates, (
+        "the preflight's messages are never checked with a top-level "
+        "`if %s:` in on_place_click's own body -- computed and never "
+        "consulted, or gated behind an enclosing condition, is the same "
+        "as never computed" % target_name
+    )
+    assert len(gates) == 1, (
+        "on_place_click gates %s more than once -- that is not the "
+        "single-check shape this guard was written against" % target_name
+    )
+    gate = gates[0]
+
+    assert any(isinstance(n, ast.Return) for n in gate.body), (
+        "the face-gap gate must RETURN directly in its body on a "
+        "refusal -- a `return` buried under a nested `if` inside the "
+        "gate is dead code, not a refusal"
+    )
+
+    # No `if` ANYWHERE inside on_place_click may be dead on arrival --
+    # same sweep #61's own guard runs, repeated here so this test alone
+    # (run in isolation, e.g. by tools/prove_guards.py) still catches a
+    # constant-false short-circuit on the gate this test added.
+    def _boolop_operands(node):
+        if isinstance(node, ast.BoolOp):
+            operands = []
+            for value in node.values:
+                operands.extend(_boolop_operands(value))
+            return operands
+        return [node]
+
+    for if_node in ast.walk(method):
+        if not isinstance(if_node, ast.If):
+            continue
+        for operand in _boolop_operands(if_node.test):
+            value = getattr(operand, "value", None)
+            assert not (isinstance(operand, ast.Constant) and value in (False, 0, None)), (
+                "an `if` inside on_place_click is short-circuited by a "
+                "constant, so code beneath it can never run: %s"
+                % ast.dump(if_node.test)[:120]
+            )

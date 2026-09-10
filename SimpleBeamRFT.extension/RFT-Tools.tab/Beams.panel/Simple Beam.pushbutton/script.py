@@ -1125,6 +1125,28 @@ class SimpleBeamWindow(forms.WPFWindow):
             "stirrup_dia_mm": stirrup_dia_mm,
         }
 
+    def _face_gap(self, is_top):
+        """One face's ``rft.ui.derivation.FaceGap`` (issue #65), read from
+        the SAME ``self.selection`` attribute and TextBoxes every other
+        face-input read in this file uses -- no second collector call.
+        Shared by the Place preflight (``_face_gap_messages``) and the
+        live sketch (``_redraw_section_canvas``), so the two can never
+        disagree about which face refuses.
+        """
+        bar_type = (
+            self.selection.top_main_bar_type if is_top
+            else self.selection.bottom_main_bar_type
+        )
+        bar_count = self._try_parse_optional_int(
+            (self.top_bar_count_tb if is_top else self.bottom_bar_count_tb).Text,
+            "{} bar count per layer".format("Top" if is_top else "Bottom"),
+        )
+        layer_count = self._try_parse_optional_int(
+            (self.top_layers_tb if is_top else self.bottom_layers_tb).Text,
+            "Number of {} layers".format("top" if is_top else "bottom"),
+        )
+        return ui_derivation.main_bar_face_gap(bar_type, bar_count, layer_count)
+
     def _sketch_face_data(self, is_top, common):
         """One face's (bar_dia_mm, layers, spacing_results), or
         (None, [], None) when the face is not usably detailed yet.
@@ -1227,6 +1249,12 @@ class SimpleBeamWindow(forms.WPFWindow):
             self._diameter_mm(self.selection.crack_bar_type)
             if crack_plan_obj is not None else None
         )
+        # #65: a face that refuses Place draws none of the bars above
+        # (top/bottom _layers is empty for it), which is indistinguishable
+        # from a face nobody asked for -- so the sketch is told WHICH
+        # inputs the refusal is about and names them in place of the bars.
+        top_gap = self._face_gap(True)
+        bottom_gap = self._face_gap(False)
         shapes = ui_sketch.section_shapes(
             common["b_mm"], common["h_mm"],
             common["cover_top_mm"], common["cover_btm_mm"], common["cover_side_mm"],
@@ -1237,6 +1265,8 @@ class SimpleBeamWindow(forms.WPFWindow):
             bottom_spacing=bottom_spacing,
             spacer_length_mm=spacer_len_mm,
             crack_dia_mm=crack_dia_mm, crack_plan=crack_plan_obj,
+            top_missing=top_gap.missing if top_gap.refuses else (),
+            bottom_missing=bottom_gap.missing if bottom_gap.refuses else (),
         )
         self._draw_shapes(canvas, shapes)
 
@@ -2368,6 +2398,59 @@ class SimpleBeamWindow(forms.WPFWindow):
 
         return missing
 
+    def _face_gap_messages(self):
+        """The issue #65 preflight -- REFUSES before the transaction opens
+        when a main face has a bar count entered but is missing its bar
+        type and/or its layer count, the exact silence the project owner
+        hit live: a bottom bar count entered, no bottom bar type picked,
+        Place quietly detailed everything else and said nothing about the
+        missing face.
+
+        The bar COUNT is the statement of intent (this ticket's corrected
+        rule) -- a bar type or layer count present alone is NOT, since
+        either can be a leftover, a default, or a value #54's persistence
+        restored on purpose while withholding the count. So this does
+        NOT fire on a type-and-layers-with-no-count face (the #54
+        restored-beam state), only on a count with something missing.
+
+        Unlike ``_missing_bar_type_and_hook_messages``, this does NOT
+        scope itself to ``review.any_requested`` or to which faces
+        ``main_bar_face_derivation`` calls REQUESTED -- a face refuses
+        independently of whether it happens to be requested (a count
+        without a type is NOT requested, and would otherwise never be
+        checked at all, which is exactly the reported defect).
+
+        Consults ``rft.ui.derivation.main_bar_face_gap`` via
+        ``self._face_gap`` -- the SAME function the live sketch calls, so
+        a face flagged here is flagged there too. A face that does not
+        refuse (fully blank, fully filled, or a type/layers with no
+        count) returns no message, matching the stated rule that
+        detailing one face on purpose must never be nagged.
+        """
+        messages = []
+        for face_label, is_top in (("Top", True), ("Bottom", False)):
+            gap = self._face_gap(is_top)
+            if not gap.refuses:
+                continue
+            messages.append(GuardMessage(
+                condition="{} face: refuses (bar count entered, {} missing)".format(
+                    face_label, ", ".join(gap.missing)
+                ),
+                spec_section=ui_derivation.FACE_GAP_SPEC_SECTION,
+                message=(
+                    "{} face: REFUSED -- a bar count was entered but {} not, "
+                    "so this face would be silently placed with nothing "
+                    "(issue #65). A bar count is a statement of intent for "
+                    "this face; either enter the {} too, or clear the bar "
+                    "count you entered to leave this face blank on "
+                    "purpose.".format(
+                        face_label, ", ".join(gap.missing), ", ".join(gap.missing),
+                    )
+                ),
+                severity=SEVERITY_BLOCKING,
+            ))
+        return messages
+
     def _spacing_refusal_messages(self, review, geometry):
         """The section 6.2-6.4 preflight (#61) -- REFUSES before the
         transaction opens rather than after, for the two guards the
@@ -2490,6 +2573,21 @@ class SimpleBeamWindow(forms.WPFWindow):
             forms.alert(str(ex), title="Invalid geometry input")
             return
         self.geometry_mm = (l_mm, b_mm, h_mm)
+
+        # #65 -- a main face with a bar count entered but missing its bar
+        # type and/or layer count was placed as if it were fully blank,
+        # silently, no message. Checked here, a direct statement of this
+        # method's own body (not nested in any if/try/with/loop), for the
+        # same reason #61's spacing preflight is: a nested check is a
+        # reachability judgement an AST guard cannot prove, a flat one is
+        # a total check that always runs.
+        face_gap_messages = self._face_gap_messages()
+        if face_gap_messages:
+            forms.alert(
+                "\n\n".join(m.message for m in face_gap_messages),
+                title="Main bar face incomplete",
+            )
+            return
 
         # This ticket's structural requirement: Place refuses by name,
         # from the SAME attribute the pickers set -- no second collector

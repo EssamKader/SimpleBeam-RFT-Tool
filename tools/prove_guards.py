@@ -395,6 +395,50 @@ CASES = [
 
     (VERSION_FILE, "v0.3.1-rc2", "v0.3.0", 'tests/test_simple_beam_xaml.py::test_the_version_file_matches_the_newest_changelog_entry',
      "VERSION bumped out of step with the changelog"),
+
+    # #65: a main face with a bar count entered but missing its bar type
+    # and/or layer count was placed as if fully blank, silently -- the
+    # live defect this ticket reports. Same four shapes a text guard can
+    # miss as #61's spacing preflight above: deleted, short-circuited by a
+    # constant, present but not returning, and re-nested behind an
+    # always-false non-constant condition.
+    (SCRIPT, "        face_gap_messages = self._face_gap_messages()\n",
+     "",
+     T + "test_place_preflight_checks_face_gaps_before_the_transaction_opens",
+     "the issue #65 face-gap preflight deleted from Place"),
+
+    (SCRIPT, "        if face_gap_messages:",
+     "        if False and face_gap_messages:",
+     T + "test_place_preflight_checks_face_gaps_before_the_transaction_opens",
+     "the face-gap gate short-circuited by a constant"),
+
+    (SCRIPT, '                title="Main bar face incomplete",\n'
+             "            )\n"
+             "            return\n",
+     '                title="Main bar face incomplete",\n'
+     "            )\n",
+     T + "test_place_preflight_checks_face_gaps_before_the_transaction_opens",
+     "the face-gap gate alerting but not returning, so Place proceeds "
+     "anyway"),
+
+    (SCRIPT, "        face_gap_messages = self._face_gap_messages()\n"
+             "        if face_gap_messages:\n"
+             "            forms.alert(\n"
+             '                "\\n\\n".join(m.message for m in face_gap_messages),\n'
+             '                title="Main bar face incomplete",\n'
+             "            )\n"
+             "            return\n",
+     "        if 1 == 2:\n"
+     "            face_gap_messages = self._face_gap_messages()\n"
+     "            if face_gap_messages:\n"
+     "                forms.alert(\n"
+     '                    "\\n\\n".join(m.message for m in face_gap_messages),\n'
+     '                    title="Main bar face incomplete",\n'
+     "                )\n"
+     "                return\n",
+     T + "test_place_preflight_checks_face_gaps_before_the_transaction_opens",
+     "the preflight re-nested inside an always-false non-constant "
+     "condition (if 1 == 2:)"),
 ]
 
 
