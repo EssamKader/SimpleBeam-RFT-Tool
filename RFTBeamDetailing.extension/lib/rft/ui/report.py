@@ -38,9 +38,6 @@ from rft.core.anchorage import (
 from rft.core.crack_bars import (
     available_height_mm,
     crack_bar_end_result,
-    crack_bar_u_positions_mm,
-    crack_layer_plan,
-    crack_layer_v_positions_mm,
     spacing_validation_exemption_note,
 )
 from rft.core.grades import (
@@ -52,16 +49,11 @@ from rft.core.grades import (
 )
 from rft.core.layout import (
     MAX_LAYERS,
-    layer_offset_mm,
     spacer_diameter_warning,
 )
 from rft.core.spacing import governing_min_spacing_mm, validate_face_spacing
 from rft.core.stirrups import (
-    ZONE_LAYOUT_FLAGS,
     centreline_leg_dimensions_mm,
-    stirrup_count_and_spacing,
-    stirrup_zones_mm,
-    zone_array_length_mm,
 )
 from rft.core import plan as core_plan
 from rft.ui import inputs as ui_inputs
@@ -358,6 +350,10 @@ def stirrups_lines(inputs, geometry):
         lines.append("- Cannot compute stirrup distribution: no closure type selected.")
         return lines
 
+    # The centreline rectangle has to be reported before the span check
+    # below, because it is knowable without a span: it is a cross-section
+    # dimension. A beam with one free end still has a stirrup shape, it
+    # just has no 3-zone distribution.
     width_mm, height_mm = centreline_leg_dimensions_mm(
         geometry["b_mm"], geometry["h_mm"], cover_mm, dia_stirrup_mm
     )
@@ -377,37 +373,39 @@ def stirrups_lines(inputs, geometry):
         )
         return lines
 
-    face_a_offset_mm = geometry["support_width_start_mm"] / 2.0
-    face_b_offset_mm = geometry["support_width_end_mm"] / 2.0
+    # #56, the rest of the way: the zones, counts and achieved spacings
+    # are now read off the SAME StirrupPlan the placer executes, rather
+    # than recomputed here from the same core functions with the same
+    # arguments. Correct either way, and free to drift either way.
     try:
-        zones = stirrup_zones_mm(geometry["l_mm"], face_a_offset_mm, face_b_offset_mm)
+        stirrups = core_plan.stirrup_plan(
+            geometry["l_mm"], geometry["b_mm"], geometry["h_mm"],
+            cover_mm, dia_stirrup_mm, closure_type, dense_mm, normal_mm,
+            geometry["support_width_start_mm"] / 2.0,
+            geometry["support_width_end_mm"] / 2.0,
+        )
     except ValueError as ex:
         lines.append("- Cannot compute stirrup zones: {}".format(ex))
         return lines
 
+    # The plan's own rectangle must be the one reported above. It is the
+    # same computation from the same inputs, so this can only fire if one
+    # of the two call sites is changed and the other is not -- which is
+    # exactly the failure this convergence is closing.
+    assert (width_mm, height_mm) == (stirrups.width_mm, stirrups.height_mm)
+
     lines.append("- L (c/c) = {:.1f} mm".format(geometry["l_mm"]))
-    zone_specs = [
-        ("zone1", zones.zone1, dense_mm, ZONE_LAYOUT_FLAGS["zone1"]),
-        ("zone2", zones.zone2, normal_mm, ZONE_LAYOUT_FLAGS["zone2"]),
-        ("zone3", zones.zone3, dense_mm, ZONE_LAYOUT_FLAGS["zone3"]),
-    ]
-    beam_total = 0
-    for name, zone, max_spacing_mm, (include_first, include_last) in zone_specs:
-        array_length_mm = zone_array_length_mm(zone)
-        try:
-            result = stirrup_count_and_spacing(array_length_mm, max_spacing_mm, include_first, include_last)
-        except ValueError as ex:
-            lines.append("- {}: {}".format(name, ex))
-            continue
-        beam_total += result.count
+    for zone_plan in stirrups.zones:
         lines.append(
             "- {}: [{:.1f}, {:.1f}] mm, array length = {:.1f} mm, achieved "
             "spacing = {:.1f} mm (max {:.1f} mm), count = {}".format(
-                name, zone.start, zone.end, array_length_mm, result.spacing_mm,
-                max_spacing_mm, result.count,
+                zone_plan.name, zone_plan.zone.start, zone_plan.zone.end,
+                zone_plan.array_length_mm, zone_plan.spacing_mm,
+                zone_plan.max_spacing_mm, zone_plan.count,
             )
         )
-    lines.append("- **Beam total stirrup count = {}**".format(beam_total))
+    lines.append("- **Beam total stirrup count = {}**".format(
+        stirrups.total_count))
     return lines
 
 
@@ -440,8 +438,18 @@ def crack_bars_lines(inputs, geometry):
     layers_top = ui_inputs.parse_optional_positive_int(inputs.top_layers_text, "Number of top layers", max_value=MAX_LAYERS)
     layers_btm = ui_inputs.parse_optional_positive_int(inputs.btm_layers_text, "Number of bottom layers", max_value=MAX_LAYERS)
 
-    offset_top_mm = layer_offset_mm(geometry["cover_top_mm"], dia_stirrup_mm, top_dia_mm, spacer_dia_mm, layers_top)
-    offset_btm_mm = layer_offset_mm(geometry["cover_btm_mm"], dia_stirrup_mm, btm_dia_mm, spacer_dia_mm, layers_btm)
+    # The two offsets and H_avail are stated BEFORE the layer plan is
+    # asked for, deliberately: if the plan cannot be computed, H_avail is
+    # very often the reason, and a negative or tiny value on the line
+    # above the failure explains it without a second run.
+    offset_top_mm = core_plan.innermost_layer_offset_mm(
+        geometry["cover_top_mm"], dia_stirrup_mm, top_dia_mm, spacer_dia_mm,
+        layers_top,
+    )
+    offset_btm_mm = core_plan.innermost_layer_offset_mm(
+        geometry["cover_btm_mm"], dia_stirrup_mm, btm_dia_mm, spacer_dia_mm,
+        layers_btm,
+    )
     h_avail_mm = available_height_mm(geometry["h_mm"], offset_top_mm, offset_btm_mm)
     lines.append(
         "- offset_top (innermost, layer {}) = {:.1f} mm, offset_btm (innermost, "
@@ -449,35 +457,48 @@ def crack_bars_lines(inputs, geometry):
     )
     lines.append("- H_avail = {:.1f} mm (section 5.1)".format(h_avail_mm))
 
+    # #56, the rest of the way: the layer count, the achieved spacing and
+    # every bar position now come from the SAME CrackPlan the placer
+    # executes. This section used to rebuild all of it -- crack_layer_plan,
+    # crack_layer_v_positions_mm, crack_bar_u_positions_mm -- from the
+    # same core functions, which is correct and still free to drift, and
+    # the "both use the shared plan" text guard could not see it because
+    # the PLACER's call to core_plan.crack_plan satisfied the check on its
+    # own.
     try:
-        plan = crack_layer_plan(h_avail_mm, s_max_mm)
+        plan = core_plan.crack_plan(
+            geometry["h_mm"], geometry["b_mm"], geometry["cover_side_mm"],
+            dia_stirrup_mm, dia_crack_mm, offset_top_mm, offset_btm_mm,
+            s_max_mm,
+        )
     except ValueError as ex:
         lines.append("- Cannot compute crack-bar layer plan: {}".format(ex))
         return lines
+
+    # Same inputs, same subtraction: this can only fire if one of the two
+    # is changed and the other is not.
+    assert h_avail_mm == plan.h_avail_mm
+
     lines.append(
         "- n_gaps = {}, n_crack_layers = {}, actual_spacing = {:.1f} mm "
         "(max s_max = {:.1f} mm, section 5.2)".format(
-            plan.n_gaps, plan.n_crack_layers, plan.actual_spacing_mm, s_max_mm
+            plan.n_gaps, plan.n_layers, plan.spacing_mm, s_max_mm
         )
     )
     lines.append("- " + spacing_validation_exemption_note())
 
-    if plan.n_crack_layers == 0:
+    if plan.n_layers == 0:
         lines.append(
             "- **n_crack_layers = 0**: H_avail <= s_max, a legitimate outcome "
             "(section 5.2) -- no crack/skin bars would be placed."
         )
         return lines
 
-    v_positions_mm = crack_layer_v_positions_mm(
-        geometry["h_mm"], offset_btm_mm, plan.n_crack_layers, plan.actual_spacing_mm
-    )
-    u_left_mm, u_right_mm = crack_bar_u_positions_mm(
-        geometry["b_mm"], geometry["cover_side_mm"], dia_stirrup_mm, dia_crack_mm
-    )
+    u_left_mm, u_right_mm = plan.u_positions_mm
     lines.append(
         "- u positions (A24): left = {:.1f} mm, right = {:.1f} mm; v positions: {}".format(
-            u_left_mm, u_right_mm, ", ".join("{:.1f}".format(v) for v in v_positions_mm)
+            u_left_mm, u_right_mm,
+            ", ".join("{:.1f}".format(v) for v in plan.v_positions_mm)
         )
     )
 
@@ -511,6 +532,6 @@ def crack_bars_lines(inputs, geometry):
             )
 
     lines.append("- **Total crack/skin bar count = {}** (2 per layer x {} layers)".format(
-        plan.n_crack_layers * 2, plan.n_crack_layers
+        plan.n_layers * 2, plan.n_layers
     ))
     return lines

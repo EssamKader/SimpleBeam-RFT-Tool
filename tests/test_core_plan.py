@@ -184,12 +184,30 @@ def test_stirrup_loop_is_the_centreline_not_the_outer_rectangle():
 
 
 def test_three_zones_with_the_layout_flags_the_verified_button_uses():
+    """The dense zones own both their boundary stirrups; the normal zone
+    owns neither, so L/3 and 2L/3 are each claimed exactly once (the R4
+    mitigation, rft.core.stirrups).
+
+    This test used to assert (False, True) and (False, True) for zones 2
+    and 3 -- the values of the second, private copy of ZONE_LAYOUT_FLAGS
+    that plan.py had grown -- while its own name claimed they were the
+    verified button's. They were not. A test that pins a duplicate is not
+    a check on the duplicate; it is a second place the duplicate is
+    written down.
+    """
+    from rft.core import stirrups
+
     result = plan.stirrup_plan(
         6000.0, B_MM, H_MM, COVER_MM, STIRRUP_DIA_MM, 1, 150.0, 200.0, 200.0, 200.0
     )
     assert [z.name for z in result.zones] == ["zone1", "zone2", "zone3"]
     assert [(z.include_first, z.include_last) for z in result.zones] == [
-        (True, True), (False, True), (False, True)
+        (True, True), (False, False), (True, True)
+    ]
+    # And stated once more against the constant itself, so this cannot
+    # drift back into being its own answer.
+    assert [(z.include_first, z.include_last) for z in result.zones] == [
+        stirrups.ZONE_LAYOUT_FLAGS[z.name] for z in result.zones
     ]
     assert result.total_count == sum(z.count for z in result.zones)
 
@@ -347,3 +365,64 @@ def test_a_crack_plan_survives_one_face_being_detailed_but_not_placed():
     )
     assert result.h_avail_mm == pytest.approx(H_MM - offsets[0] - offsets[1])
     assert result.n_layers >= 1
+
+
+# --- one constant, one definition ------------------------------------------
+
+
+def test_the_zone_layout_flags_are_the_tested_ones_not_a_second_copy():
+    """This module restated ZONE_LAYOUT_FLAGS instead of importing it, and
+    the copy said something different: zone2 (False, True), zone3
+    (False, True), against the original's zone2 (False, False), zone3
+    (True, True).
+
+    Both give each zone boundary exactly one owner, so both place bars at
+    the SAME POSITIONS and both total 47 on the verification beam. That is
+    why it went unnoticed. What differed was which zone owns the bar at
+    2L/3 -- so the Review report, which imported the original, said
+    "zone2: count = 9, zone3: count = 19" while Place built sets of 10 and
+    18. Identical steel, described wrongly, in a released version.
+    """
+    from rft.core import stirrups
+
+    assert plan.ZONE_LAYOUT_FLAGS is stirrups.ZONE_LAYOUT_FLAGS, (
+        "rft.core.plan must re-export rft.core.stirrups.ZONE_LAYOUT_FLAGS, "
+        "not hold its own copy: the copy is free to disagree, and did."
+    )
+    assert plan.ZONE_LAYOUT_FLAGS == {
+        "zone1": (True, True),
+        "zone2": (False, False),
+        "zone3": (True, True),
+    }
+
+
+def test_only_one_module_defines_the_zone_layout_flags():
+    """The `is` check above passes the moment plan.py imports the name --
+    including if some third module grows its own literal copy. This looks
+    for the literal itself, anywhere in the library.
+    """
+    import io
+    import os
+    import re
+
+    lib = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "RFTBeamDetailing.extension", "lib")
+    definers = []
+    for dirpath, _dirnames, filenames in os.walk(lib):
+        if "__pycache__" in dirpath:
+            continue
+        for filename in filenames:
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, filename)
+            text = io.open(path, encoding="utf-8").read()
+            # An assignment to a literal dict, as opposed to an import or
+            # the re-export.
+            if re.search(r"^ZONE_LAYOUT_FLAGS = \{", text, re.MULTILINE):
+                definers.append(os.path.relpath(path, lib).replace("\\", "/"))
+    assert definers == ["rft/core/stirrups.py"], (
+        "ZONE_LAYOUT_FLAGS must be defined in exactly one place -- the "
+        "module whose docstring carries the R4 de-duplication reasoning. "
+        "Defined in: %s" % definers
+    )

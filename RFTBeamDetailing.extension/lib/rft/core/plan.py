@@ -42,6 +42,7 @@ from rft.core.layout import (
     main_layer_v_positions_mm,
 )
 from rft.core.stirrups import (
+    ZONE_LAYOUT_FLAGS,
     centreline_leg_dimensions_mm,
     stirrup_count_and_spacing,
     stirrup_curve_endpoints_mm,
@@ -70,11 +71,23 @@ ZonePlan = namedtuple(
     "array_length_mm count spacing_mm",
 )
 
-StirrupPlan = namedtuple("StirrupPlan", "endpoints_mm zones total_count")
+# ``width_mm``/``height_mm`` are the CENTRELINE rectangle the endpoints
+# were derived from. Carried on the plan rather than left as a local,
+# because the report states them (240 x 840 on the verification beam,
+# where the OUTER rectangle is 260 x 860) and the report must state what
+# the plan holds, not recompute it.
+StirrupPlan = namedtuple(
+    "StirrupPlan", "endpoints_mm width_mm height_mm zones total_count")
 
+# ``n_gaps`` and the two offsets are inputs and intermediates rather
+# than positions, and are carried for the same reason as the stirrup
+# rectangle above: the report prints all three (section 5.2's gap count,
+# and the innermost layer offset per face that H_avail is measured
+# between), and a report that recomputes them can disagree with the bars.
 CrackPlan = namedtuple(
     "CrackPlan",
-    "h_avail_mm n_layers spacing_mm v_positions_mm u_positions_mm",
+    "h_avail_mm n_gaps n_layers spacing_mm v_positions_mm u_positions_mm "
+    "offset_top_mm offset_btm_mm",
 )
 
 
@@ -202,14 +215,24 @@ def face_plan(is_top, h_mm, b_mm, cover_face_mm, cover_side_mm, cover_end_mm,
     )
 
 
-# Which stirrup of a zone's array Revit itself lays out, per zone (§3.1).
-# Shared by the report and the placer so a zone cannot be reported with
-# one set of end flags and placed with another.
-ZONE_LAYOUT_FLAGS = {
-    "zone1": (True, True),
-    "zone2": (False, True),
-    "zone3": (False, True),
-}
+# Which stirrup of a zone's array Revit itself lays out, per zone (§3.1),
+# RE-EXPORTED from rft.core.stirrups rather than restated.
+#
+# It was restated here when this module was written, and the copy said
+# something different: zone2 (False, True) and zone3 (False, True), where
+# the original says zone2 (False, False) and zone3 (True, True). Both give
+# each boundary exactly one owner, so both place bars at the same
+# positions and both total 47 on the verification beam -- which is why
+# nothing noticed. What differed was WHICH ZONE owns the bar at 2L/3, so
+# the Review report (which imported the original) said "zone2: count = 9,
+# zone3: count = 19" while Place built sets of 10 and 18.
+#
+# The original is the one with the reasoning attached (the R4
+# de-duplication mitigation, issue #18 review finding #1), the one
+# tests/test_stirrups.py pins, and the one rft.revit.stirrups documents
+# against. A second copy of a constant is not a shortcut; it is a second
+# answer waiting to be given.
+ZONE_LAYOUT_FLAGS = ZONE_LAYOUT_FLAGS
 
 
 def stirrup_plan(l_mm, b_mm, h_mm, cover_mm, stirrup_dia_mm, closure_type,
@@ -249,6 +272,8 @@ def stirrup_plan(l_mm, b_mm, h_mm, cover_mm, stirrup_dia_mm, closure_type,
         ))
     return StirrupPlan(
         endpoints_mm=stirrup_curve_endpoints_mm(closure_type, width_mm, height_mm),
+        width_mm=width_mm,
+        height_mm=height_mm,
         zones=zone_plans,
         total_count=total,
     )
@@ -271,7 +296,10 @@ def crack_plan(h_mm, b_mm, cover_side_mm, stirrup_dia_mm, crack_dia_mm,
     # layer on top of a main-bar layer.
     return CrackPlan(
         h_avail_mm=h_avail_mm,
+        n_gaps=layers.n_gaps,
         n_layers=layers.n_crack_layers,
+        offset_top_mm=offset_top_innermost_mm,
+        offset_btm_mm=offset_btm_innermost_mm,
         spacing_mm=layers.actual_spacing_mm,
         v_positions_mm=crack_layer_v_positions_mm(
             h_mm, offset_btm_innermost_mm, layers.n_crack_layers,
