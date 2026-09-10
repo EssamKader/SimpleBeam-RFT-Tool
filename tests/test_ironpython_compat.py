@@ -23,10 +23,8 @@ import io
 import os
 import re
 
-EXT_ROOT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "RFTBeamDetailing.extension",
-)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXT_ROOT = os.path.join(REPO_ROOT, "RFTBeamDetailing.extension")
 
 # PEP 263: the cookie must appear on line 1 or line 2 to be honoured.
 CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)")
@@ -120,3 +118,71 @@ def test_no_python3_only_stdlib_calls():
     assert not offenders, (
         "these calls do not exist in IronPython 2.7:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_the_suite_declares_every_third_party_module_it_imports():
+    """The dependency list in .github/workflows/tests.yml must match what
+    the suite actually imports.
+
+    The first version of that workflow installed pytest alone, reasoning
+    from the LIBRARY's imports -- which really do stop at the standard
+    library plus the Revit API. The suite is a different thing: one guard
+    parses bundle.yaml with a real YAML parser, because what matters is
+    what pyRevit will read rather than what the text looks like. CI failed
+    on its first run, which is the good outcome; this test is so the next
+    one fails here instead, before it is pushed.
+
+    ``Autodesk`` is not installed anywhere: tests/fake_revit_api.py puts
+    it into sys.modules. It is listed for exactly that reason -- so nobody
+    tries to pip install it.
+    """
+    import ast
+    import sys
+
+    ALLOWED = {
+        "pytest",       # installed by CI
+        "yaml",         # installed by CI (the bundle.yaml guard)
+        "Autodesk",     # faked in tests/fake_revit_api.py, never installed
+    }
+    LOCAL = {"rft", "fake_revit_api", "conftest"}
+    stdlib = set(sys.stdlib_module_names)
+
+    found = {}
+    for root in ("tests", "tools"):
+        root_dir = os.path.join(REPO_ROOT, root)
+        for dirpath, _dirnames, filenames in os.walk(root_dir):
+            if "__pycache__" in dirpath:
+                continue
+            for filename in sorted(filenames):
+                if not filename.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                tree = ast.parse(io.open(path, encoding="utf-8").read(), path)
+                for node in ast.walk(tree):
+                    names = []
+                    if isinstance(node, ast.Import):
+                        names = [a.name.split(".")[0] for a in node.names]
+                    elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                        names = [node.module.split(".")[0]]
+                    for name in names:
+                        if name not in stdlib and name not in LOCAL:
+                            found.setdefault(name, []).append(
+                                os.path.relpath(path, REPO_ROOT).replace("\\", "/"))
+
+    undeclared = sorted(set(found) - ALLOWED)
+    assert not undeclared, (
+        "these third-party modules are imported by the test suite but are "
+        "not in ALLOWED here, and so are probably not installed by "
+        ".github/workflows/tests.yml either: %s"
+        % {name: found[name] for name in undeclared}
+    )
+
+    workflow = io.open(
+        os.path.join(REPO_ROOT, ".github", "workflows", "tests.yml"),
+        encoding="utf-8").read()
+    install_line = [ln for ln in workflow.split("\n") if "pip install" in ln]
+    assert install_line, "no pip install step found in the workflow"
+    for name in sorted(set(found) & ALLOWED - {"Autodesk"}):
+        assert name in install_line[0], (
+            "%s is imported by the suite but the CI install step does not "
+            "mention it: %r" % (name, install_line[0].strip()))
