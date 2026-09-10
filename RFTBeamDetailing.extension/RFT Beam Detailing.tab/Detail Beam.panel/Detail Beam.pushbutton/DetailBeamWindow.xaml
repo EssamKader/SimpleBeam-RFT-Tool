@@ -4,8 +4,7 @@
         Height="680" Width="880"
         MinHeight="520" MinWidth="640"
         WindowStartupLocation="CenterScreen"
-        SizeToContent="Manual"
-        Background="{StaticResource SurfaceWhite}">
+        SizeToContent="Manual">
 
     <!-- #60: the palette, declared ONCE. Every colour in this window is a
          named brush from here, so the whole scheme changes in one place
@@ -108,7 +107,13 @@
          #42 spike. Every tab is now built: Beam & Materials (#47),
          Main bars / Stirrups / Crack bars (#48), Review (#50), and
          placement itself (#56). #60 gives it the palette. -->
-    <Grid Margin="8">
+    <!-- The window ground lives HERE, on the root Grid, not on the Window
+         element. A Window's own attributes are resolved BEFORE its
+         Window.Resources block is populated, so a StaticResource up there
+         cannot see these brushes and throws "Cannot find resource named
+         'SurfaceWhite'" at load. A child element is parsed after the
+         resources and resolves fine. -->
+    <Grid Margin="8" Background="{StaticResource SurfaceWhite}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>

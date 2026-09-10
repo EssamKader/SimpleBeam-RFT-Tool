@@ -539,3 +539,43 @@ def test_no_xaml_comment_contains_a_double_hyphen():
         "comments next door, which is exactly why this keeps happening."
         % offenders
     )
+
+
+def test_the_window_element_itself_uses_no_static_resource():
+    """The defect that broke v0.2.0-rc6 the moment the button was pressed.
+
+    ``Background="{StaticResource SurfaceWhite}"`` was set on the <Window>
+    element, whose own attributes are resolved BEFORE its
+    ``Window.Resources`` block is populated -- so the name does not exist
+    yet and WPF throws "Cannot find resource named 'SurfaceWhite'" at
+    load. A forward reference, and ``StaticResource`` does not do forward
+    references.
+
+    The XML parsed perfectly, so ``test_xaml_parses`` was green: this is a
+    WPF SEMANTIC error inside well-formed markup. Put window-level brushes
+    on the root panel, which is a child and therefore parsed after the
+    resources.
+    """
+    text = io.open(XAML_PATH, encoding="utf-8").read()
+    window_tag = text[:text.index(">")]
+    assert "StaticResource" not in window_tag, (
+        "the <Window> element's own attributes cannot reference "
+        "Window.Resources -- they are resolved before it exists. Move the "
+        "brush onto the root Grid instead."
+    )
+
+
+def test_every_static_resource_reference_is_defined():
+    """The same class of failure, generalised: any StaticResource whose
+    key is never declared throws only when the window is constructed, on a
+    live host, with a stack trace forty frames deep.
+    """
+    text = io.open(XAML_PATH, encoding="utf-8").read()
+    used = set(re.findall(r"\{StaticResource\s+([A-Za-z0-9_]+)\s*\}", text))
+    declared = set(re.findall(r'x:Key="([A-Za-z0-9_]+)"', text))
+    assert used, "no StaticResource references found -- pattern broken?"
+    missing = sorted(used - declared)
+    assert not missing, (
+        "these StaticResource keys are referenced but never declared with "
+        "x:Key, which throws at window construction: %s" % missing
+    )
